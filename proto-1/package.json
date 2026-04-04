@@ -5,6 +5,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "mock": "node mock-backend.js",
+    "mock:4002": "node mock-backend.js 4002",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

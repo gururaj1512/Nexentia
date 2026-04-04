@@ -695,7 +695,7 @@
         </div>
       </div>
 
-      <label>Request Body (JSON)</label>
+      <label>Request Body (JSON) <span id="body-err" style="color:var(--red);font-size:.68rem;margin-left:6px;"></span></label>
       <textarea id="req-body" placeholder='{"key": "value"}'></textarea>
 
       <button class="btn btn-primary btn-full" id="send-btn" onclick="sendRequest()">
@@ -710,9 +710,15 @@
           <div id="response-status"></div>
         </div>
 
+        <!-- Body that was sent (sent body echo) -->
+        <div id="sent-body-section" style="display:none">
+          <div class="res-section-label" style="color:#60a5fa;">Sent Body (forwarded by proxy)</div>
+          <div class="highlight-box" id="sent-body-box" style="color:#60a5fa;background:#0a1a2e;border-color:#1e3a5f;"></div>
+        </div>
+
         <!-- Message your body came back as -->
         <div id="recv-body-section" style="display:none">
-          <div class="res-section-label msg-label">Your message (receivedBody)</div>
+          <div class="res-section-label msg-label">Echoed Back (receivedBody)</div>
           <div class="highlight-box" id="recv-body-box"></div>
         </div>
 
@@ -918,12 +924,33 @@
     const method   = document.getElementById('req-method').value;
     const path     = document.getElementById('req-path').value.trim();
     const bodyText = document.getElementById('req-body').value.trim();
+    const bodyErrEl = document.getElementById('body-err');
+    const hasBody  = method !== 'GET' && method !== 'HEAD';
+
+    bodyErrEl.textContent = '';
+
+    // ── Validate JSON body if provided
+    let bodySend = null;
+    if (hasBody) {
+      if (bodyText) {
+        try {
+          JSON.parse(bodyText);   // just validate
+          bodySend = bodyText;
+        } catch(jsonErr) {
+          bodyErrEl.textContent = '✖ Invalid JSON — fix before sending';
+          return;
+        }
+      } else {
+        // Send empty object so Content-Type is still set and body isn't undefined
+        bodySend = '{}';
+      }
+    }
 
     const opts = { method, headers: {} };
     if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-    if (bodyText && method !== 'GET' && method !== 'HEAD') {
+    if (hasBody) {
       opts.headers['Content-Type'] = 'application/json';
-      opts.body = bodyText;
+      opts.body = bodySend;
     }
 
     const btn = document.getElementById('send-btn');
@@ -932,8 +959,15 @@
     resetSteps();
 
     // Hide previous response sections
-    document.getElementById('recv-body-section').style.display  = 'none';
+    document.getElementById('sent-body-section').style.display   = 'none';
+    document.getElementById('recv-body-section').style.display   = 'none';
     document.getElementById('proxy-proof-section').style.display = 'none';
+
+    // Show sent body for non-GET methods
+    if (hasBody) {
+      document.getElementById('sent-body-section').style.display = '';
+      document.getElementById('sent-body-box').innerHTML = highlight(bodySend);
+    }
 
     try {
       const r    = await fetch(path, opts);
@@ -949,11 +983,14 @@
       document.getElementById('response-status').innerHTML =
         `<span class="status-badge ${cls}">${r.status} ${r.statusText}</span>`;
 
-      // ── Show receivedBody prominently (the message the user sent, echoed back)
-      if (parsed && parsed.receivedBody !== undefined && parsed.receivedBody !== null) {
+      // ── Show receivedBody for all non-GET methods (even if null)
+      if (hasBody && parsed) {
         document.getElementById('recv-body-section').style.display = '';
+        const rb = parsed.receivedBody;
         document.getElementById('recv-body-box').innerHTML =
-          highlight(JSON.stringify(parsed.receivedBody, null, 2));
+          rb !== undefined && rb !== null
+            ? highlight(JSON.stringify(rb, null, 2))
+            : '<span style="color:var(--muted);font-style:italic;">(none — backend received empty body)</span>';
       }
 
       // ── Show proxy evidence headers
