@@ -1,0 +1,34 @@
+{
+  "proxy": {
+    "port": 3000,
+    "routes": [
+      {
+        "path": "/api/v1",
+        "target": "http://localhost:4001",
+        "stripPrefix": true,
+        "auth": true
+      },
+      {
+        "path": "/api/v2",
+        "target": "http://localhost:4002",
+        "stripPrefix": true,
+        "auth": true
+      },
+      {
+        "path": "/public",
+        "target": "http://localhost:4001",
+        "stripPrefix": false,
+        "auth": false
+      }
+    ]
+  },
+  "auth": {
+    "jwtSecret": "nexentia",
+    "tokenExpiry": "44h",
+    "saltRounds": 5
+  },
+  "database": {
+    "connectionString": "postgresql://neondb_owner:npg_gbueOAwqz70d@ep-hidden-lab-anb7qt1b-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+    "ssl": true
+  }
+}

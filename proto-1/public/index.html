@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proxy Engine — Live Flow Visualizer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0f14;
+      --surface: #141720;
+      --surface2: #1c2030;
+      --border: #252a3a;
+      --accent: #4f8ef7;
+      --accent2: #7c3aed;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --font: 'Segoe UI', system-ui, sans-serif;
+      --mono: 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .03em; }
+    header .pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: .72rem;
+      padding: 3px 10px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    #conn-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .78rem;
+    }
+    #conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s;
+    }
+    #conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    /* ── LAYOUT ── */
+    .workspace {
+      display: grid;
+      grid-template-columns: 320px 1fr 340px;
+      gap: 0;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    /* ── PANELS ── */
+    .panel {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel:last-child { border-right: none; }
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── SECTION TITLES ── */
+    .section-title {
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    /* ── FORM ELEMENTS ── */
+    input, select, textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: .82rem;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 64px; font-family: var(--mono); font-size: .78rem; }
+    label { display: block; font-size: .75rem; color: var(--muted); margin-bottom: 4px; margin-top: 10px; }
+    label:first-child { margin-top: 0; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: var(--red); color: #fff; }
+    .btn-success { background: var(--green); color: #fff; }
+    .btn-full { width: 100%; margin-top: 12px; }
+
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+    }
+    .tab {
+      padding: 10px 14px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .msg { font-size: .78rem; padding: 8px 10px; border-radius: 6px; margin-top: 10px; }
+    .msg.ok { background: #14332a; color: var(--green); border: 1px solid #1a5c3a; }
+    .msg.err { background: #3a1414; color: var(--red); border: 1px solid #5c1a1a; }
+
+    /* ── ROUTES LIST ── */
+    .route-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      font-size: .78rem;
+    }
+    .route-card .path {
+      font-family: var(--mono);
+      font-size: .82rem;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .route-card .target { color: var(--muted); font-family: var(--mono); font-size: .74rem; }
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: .66rem;
+      font-weight: 700;
+      margin-top: 6px;
+      margin-right: 4px;
+    }
+    .badge-auth { background: #2d1f5e; color: #a78bfa; border: 1px solid #4c1d95; }
+    .badge-open { background: #1a3320; color: var(--green); border: 1px solid #14532d; }
+    .badge-strip { background: #1a2a3a; color: #60a5fa; border: 1px solid #1e3a5f; }
+
+    /* ── FLOW VISUALIZER ── */
+    .flow-canvas {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      gap: 0;
+      overflow: hidden;
+    }
+
+    .flow-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      padding: 20px 0 8px;
+      flex-shrink: 0;
+    }
+
+    .flow-node {
+      background: var(--surface2);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      text-align: center;
+      min-width: 120px;
+      transition: border-color .3s, box-shadow .3s;
+      position: relative;
+    }
+    .flow-node.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 16px rgba(79,142,247,.35);
+    }
+    .flow-node.error {
+      border-color: var(--red);
+      box-shadow: 0 0 16px rgba(239,68,68,.35);
+    }
+    .flow-node .node-icon { font-size: 1.6rem; margin-bottom: 4px; }
+    .flow-node .node-label { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .flow-node .node-port { font-family: var(--mono); font-size: .72rem; color: var(--accent); margin-top: 2px; }
+
+    .flow-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      width: 90px;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .arrow-line {
+      width: 100%;
+      height: 2px;
+      background: var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+    .arrow-line::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      transition: none;
+    }
+    .arrow-line.animate::after {
+      animation: flowPulse .6s ease-in-out;
+    }
+    .arrow-line.animate-back::after {
+      animation: flowPulseBack .6s ease-in-out;
+      background: linear-gradient(270deg, transparent, var(--green), transparent);
+    }
+    .arrow-line.animate-err::after {
+      animation: flowPulse .6s ease-in-out;
+      background: linear-gradient(90deg, transparent, var(--red), transparent);
+    }
+    @keyframes flowPulse {
+      0%   { left: -100%; }
+      100% { left: 100%; }
+    }
+    @keyframes flowPulseBack {
+      0%   { left: 100%; }
+      100% { left: -100%; }
+    }
+    .arrow-head {
+      font-size: .65rem;
+      color: var(--muted);
+      white-space: nowrap;
+      font-size: .65rem;
+    }
+    .arrow-label {
+      font-size: .62rem;
+      color: var(--muted);
+      white-space: nowrap;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    /* ── STEP TRACKER ── */
+    .step-tracker {
+      flex-shrink: 0;
+      padding: 0 0 12px;
+    }
+    .step-list {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      font-size: .72rem;
+      background: var(--surface2);
+      color: var(--muted);
+      transition: all .3s;
+    }
+    .step-item .step-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background .3s;
+    }
+    .step-item.active { border-color: var(--accent); color: var(--text); }
+    .step-item.active .step-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+    .step-item.done { border-color: var(--green); color: var(--green); }
+    .step-item.done .step-dot { background: var(--green); }
+    .step-item.err { border-color: var(--red); color: var(--red); }
+    .step-item.err .step-dot { background: var(--red); }
+
+    /* ── EVENT LOG (middle panel lower) ── */
+    .event-log {
+      flex: 1;
+      overflow-y: auto;
+      font-family: var(--mono);
+      font-size: .72rem;
+      line-height: 1.7;
+      padding: 0;
+    }
+    .event-log::-webkit-scrollbar { width: 4px; }
+    .event-log::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .log-entry {
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: 58px 160px 1fr;
+      gap: 8px;
+      align-items: start;
+      animation: slideIn .2s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .log-entry:hover { background: var(--surface2); }
+    .log-time { color: var(--muted); }
+    .log-step { font-weight: 700; }
+    .log-step.CLIENT_TO_PROXY { color: #60a5fa; }
+    .log-step.PROXY_TO_BACKEND { color: #f59e0b; }
+    .log-step.BACKEND_TO_PROXY { color: #a78bfa; }
+    .log-step.PROXY_TO_CLIENT  { color: var(--green); }
+    .log-step.PROXY_ERROR       { color: var(--red); }
+    .log-step.CONNECTED         { color: var(--muted); }
+    .log-detail { color: var(--muted); word-break: break-all; }
+
+    /* ── RIGHT PANEL ── */
+    .req-builder { display: flex; flex-direction: column; gap: 0; height: 100%; }
+
+    .method-path { display: grid; grid-template-columns: 90px 1fr; gap: 8px; }
+
+    .response-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: .74rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 180px;
+      overflow-y: auto;
+      color: var(--text);
+      margin-top: 6px;
+    }
+    .response-box::-webkit-scrollbar { width: 4px; }
+    .response-box::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* JSON syntax highlighting */
+    .json-key    { color: #7dd3fc; }
+    .json-str    { color: #86efac; }
+    .json-num    { color: #fca5a5; }
+    .json-bool   { color: #f9a8d4; }
+    .json-null   { color: var(--muted); }
+
+    .highlight-box {
+      background: #0f2a1a;
+      border: 1px solid #1a5c3a;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--mono);
+      font-size: .78rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 120px;
+      overflow-y: auto;
+      margin-top: 6px;
+      color: #86efac;
+    }
+    .highlight-box::-webkit-scrollbar { width: 4px; }
+    .highlight-box::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .proof-box {
+      background: #1a1a2e;
+      border: 1px solid #2d2d5e;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: .72rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 100px;
+      overflow-y: auto;
+      margin-top: 6px;
+      color: #a78bfa;
+    }
+    .proof-box::-webkit-scrollbar { width: 4px; }
+    .proof-box::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .res-section-label {
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-top: 10px;
+      margin-bottom: 2px;
+    }
+    .res-section-label.msg-label  { color: var(--green); }
+    .res-section-label.proof-label { color: #a78bfa; }
+    .res-section-label.raw-label  { color: var(--muted); }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: .72rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .status-2xx { background: #14332a; color: var(--green); }
+    .status-4xx { background: #3a2814; color: var(--yellow); }
+    .status-5xx { background: #3a1414; color: var(--red); }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 14px 0;
+    }
+
+    .token-display {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: .68rem;
+      color: var(--yellow);
+      word-break: break-all;
+      margin-top: 8px;
+      max-height: 80px;
+      overflow-y: auto;
+    }
+
+    .clear-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .7rem;
+      margin-left: auto;
+      padding: 0;
+    }
+    .clear-btn:hover { color: var(--text); }
+
+    /* ── STEP EXPLANATION ── */
+    .step-explain {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: .76rem;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .step-explain h3 {
+      font-size: .75rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 6px;
+      letter-spacing: .04em;
+    }
+    .step-explain ol {
+      padding-left: 16px;
+      color: var(--muted);
+    }
+    .step-explain ol li { margin-bottom: 3px; }
+    .step-explain ol li strong { color: var(--text); }
+
+    /* responsive */
+    @media (max-width: 1100px) {
+      .workspace { grid-template-columns: 280px 1fr 300px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Proxy Engine</h1>
+  <span class="pill">Dynamic Router + Auth</span>
+  <div id="conn-status">
+    <div id="conn-dot"></div>
+    <span id="conn-label">Connecting…</span>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ── LEFT: Auth + Routes ── -->
+  <div class="panel">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('auth')">Auth</div>
+      <div class="tab" onclick="switchTab('routes')">Routes</div>
+    </div>
+
+    <!-- Auth Tab -->
+    <div id="tab-auth" class="panel-body">
+      <div id="auth-logged-out">
+        <div class="tab-bar" style="border:none;padding:0;margin-bottom:12px;">
+          <div class="tab active" style="padding:6px 10px" onclick="switchAuthMode('login')">Login</div>
+          <div class="tab" style="padding:6px 10px" onclick="switchAuthMode('register')">Register</div>
+        </div>
+
+        <!-- Login Form -->
+        <div id="form-login">
+          <div class="section-title">Sign in</div>
+          <label>Email</label>
+          <input type="email" id="login-email" placeholder="alice@example.com" />
+          <label>Password</label>
+          <input type="password" id="login-pass" placeholder="••••••••" />
+          <button class="btn btn-primary btn-full" onclick="doLogin()">Login</button>
+          <div id="login-msg"></div>
+        </div>
+
+        <!-- Register Form -->
+        <div id="form-register" style="display:none">
+          <div class="section-title">Create account</div>
+          <label>Username</label>
+          <input type="text" id="reg-username" placeholder="alice" />
+          <label>Email</label>
+          <input type="email" id="reg-email" placeholder="alice@example.com" />
+          <label>Password</label>
+          <input type="password" id="reg-pass" placeholder="••••••••" />
+          <button class="btn btn-success btn-full" onclick="doRegister()">Register</button>
+          <div id="reg-msg"></div>
+        </div>
+      </div>
+
+      <div id="auth-logged-in" style="display:none">
+        <div class="section-title">Session</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-bottom:6px;">Signed in as</div>
+        <div style="font-size:.92rem;font-weight:600;" id="logged-in-user">—</div>
+        <div class="divider"></div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">JWT Token (auto-injected into requests)</div>
+        <div class="token-display" id="token-display">—</div>
+        <button class="btn btn-danger btn-full" style="margin-top:14px" onclick="doLogout()">Logout</button>
+      </div>
+    </div>
+
+    <!-- Routes Tab -->
+    <div id="tab-routes" class="panel-body" style="display:none">
+      <div class="section-title">Loaded Routes</div>
+      <div id="routes-list">
+        <div style="color:var(--muted);font-size:.78rem;">Loading…</div>
+      </div>
+      <div class="divider"></div>
+      <div class="step-explain">
+        <h3>How the Flow Works</h3>
+        <ol>
+          <li><strong>Client</strong> sends HTTP request to proxy on <code>:3000</code></li>
+          <li><strong>Proxy</strong> matches the URL path against <code>config.json</code> routes</li>
+          <li>If route has <code>auth: true</code>, JWT is verified against NeonDB sessions</li>
+          <li><strong>Proxy</strong> strips the prefix (if configured) and forwards to the hidden backend port</li>
+          <li><strong>Backend</strong> processes the request and responds</li>
+          <li>Proxy pipes the response back to the original <strong>client</strong></li>
+          <li>All 4 hops are streamed live to this UI via SSE</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MIDDLE: Flow Visualizer + Event Log ── -->
+  <div class="panel" style="border-right:1px solid var(--border);">
+    <div class="panel-header">
+      Live Flow Visualizer
+      <button class="clear-btn" onclick="clearLog()">clear log</button>
+    </div>
+
+    <div class="flow-canvas">
+      <!-- Flow Diagram -->
+      <div class="flow-diagram">
+        <div class="flow-node" id="node-client">
+          <div class="node-icon">💻</div>
+          <div class="node-label">Client</div>
+          <div class="node-port">Browser / curl</div>
+        </div>
+
+        <div class="flow-arrow" id="arrow-c2p">
+          <div class="arrow-head">→</div>
+          <div class="arrow-line" id="line-c2p"></div>
+          <div class="arrow-label" id="label-c2p">—</div>
+        </div>
+
+        <div class="flow-node" id="node-proxy">
+          <div class="node-icon">⚙️</div>
+          <div class="node-label">Proxy</div>
+          <div class="node-port" id="proxy-port">:3000</div>
+        </div>
+
+        <div class="flow-arrow" id="arrow-p2b">
+          <div class="arrow-head">→</div>
+          <div class="arrow-line" id="line-p2b"></div>
+          <div class="arrow-label" id="label-p2b">—</div>
+        </div>
+
+        <div class="flow-node" id="node-backend">
+          <div class="node-icon">🖥️</div>
+          <div class="node-label">Backend</div>
+          <div class="node-port" id="backend-port">:4001</div>
+        </div>
+      </div>
+
+      <!-- Step Tracker -->
+      <div class="step-tracker">
+        <div class="step-list">
+          <div class="step-item" id="step-CLIENT_TO_PROXY">
+            <div class="step-dot"></div>1. Client → Proxy
+          </div>
+          <div class="step-item" id="step-PROXY_TO_BACKEND">
+            <div class="step-dot"></div>2. Proxy → Backend
+          </div>
+          <div class="step-item" id="step-BACKEND_TO_PROXY">
+            <div class="step-dot"></div>3. Backend → Proxy
+          </div>
+          <div class="step-item" id="step-PROXY_TO_CLIENT">
+            <div class="step-dot"></div>4. Proxy → Client
+          </div>
+        </div>
+      </div>
+
+      <!-- Event Log -->
+      <div class="panel-header" style="flex-shrink:0;border-top:1px solid var(--border);">
+        Event Stream <span style="font-size:.65rem;font-weight:400;color:var(--muted);">(SSE)</span>
+      </div>
+      <div class="event-log" id="event-log"></div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Request Builder ── -->
+  <div class="panel">
+    <div class="panel-header">Request Builder</div>
+    <div class="panel-body req-builder">
+
+      <div class="section-title">Send Request Through Proxy</div>
+
+      <div class="method-path">
+        <div>
+          <label>Method</label>
+          <select id="req-method">
+            <option>GET</option>
+            <option>POST</option>
+            <option>PUT</option>
+            <option>PATCH</option>
+            <option>DELETE</option>
+          </select>
+        </div>
+        <div>
+          <label>Path</label>
+          <input type="text" id="req-path" placeholder="/api/v1/hello" value="/api/v1/hello" />
+        </div>
+      </div>
+
+      <label>Request Body (JSON)</label>
+      <textarea id="req-body" placeholder='{"key": "value"}'></textarea>
+
+      <button class="btn btn-primary btn-full" id="send-btn" onclick="sendRequest()">
+        ▶ Send Request
+      </button>
+
+      <!-- Response -->
+      <div id="response-area" style="display:none">
+        <div class="divider"></div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="section-title" style="margin:0">Response</div>
+          <div id="response-status"></div>
+        </div>
+
+        <!-- Message your body came back as -->
+        <div id="recv-body-section" style="display:none">
+          <div class="res-section-label msg-label">Your message (receivedBody)</div>
+          <div class="highlight-box" id="recv-body-box"></div>
+        </div>
+
+        <!-- Proxy proof headers -->
+        <div id="proxy-proof-section" style="display:none">
+          <div class="res-section-label proof-label">Proxy Evidence (injected headers)</div>
+          <div class="proof-box" id="proxy-proof-box"></div>
+        </div>
+
+        <!-- Full raw response -->
+        <div class="res-section-label raw-label">Full Response</div>
+        <div class="response-box" id="response-body"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Quick Routes -->
+      <div class="section-title">Quick Tests</div>
+      <div id="quick-routes" style="display:flex;flex-direction:column;gap:6px;"></div>
+
+      <div class="divider"></div>
+
+      <!-- Config snapshot -->
+      <div class="section-title">Auth State</div>
+      <div style="font-size:.74rem;color:var(--muted);">
+        Token is auto-added to <code>Authorization: Bearer</code> header when logged in.
+        Routes with <code>auth: true</code> require a valid token.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  /* ── STATE ── */
+  let token = null;
+  let currentUser = null;
+  let routes = [];
+  let activeSteps = {};
+  let stepTimer = null;
+
+  /* ── SSE ── */
+  let es;
+  function connectSSE() {
+    es = new EventSource('/events');
+    es.onopen = () => {
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-label').textContent = 'Live';
+    };
+    es.onerror = () => {
+      document.getElementById('conn-dot').classList.remove('live');
+      document.getElementById('conn-label').textContent = 'Reconnecting…';
+    };
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      appendLog(ev);
+      animateStep(ev);
+    };
+  }
+  connectSSE();
+
+  /* ── LOAD CONFIG ── */
+  async function loadConfig() {
+    try {
+      const r = await fetch('/config-info');
+      const cfg = await r.json();
+      routes = cfg.routes;
+      document.getElementById('proxy-port').textContent = `:${cfg.proxyPort}`;
+      renderRoutes();
+      renderQuickTests();
+    } catch(e) { console.error(e); }
+  }
+  loadConfig();
+
+  /* ── ROUTES RENDER ── */
+  function renderRoutes() {
+    const el = document.getElementById('routes-list');
+    el.innerHTML = routes.map(r => `
+      <div class="route-card">
+        <div class="path">${r.path}</div>
+        <div class="target">→ ${r.target}</div>
+        <span class="badge ${r.auth ? 'badge-auth' : 'badge-open'}">${r.auth ? '🔒 auth' : '🌐 public'}</span>
+        ${r.stripPrefix ? '<span class="badge badge-strip">strip-prefix</span>' : ''}
+      </div>
+    `).join('');
+  }
+
+  function renderQuickTests() {
+    const el = document.getElementById('quick-routes');
+    el.innerHTML = routes.map(r => `
+      <button class="btn btn-secondary" style="font-size:.72rem;justify-content:flex-start;gap:8px;"
+        onclick="quickTest('${r.path}','${r.target}')">
+        <span style="color:${r.auth ? '#a78bfa' : 'var(--green)'}">●</span>
+        GET ${r.path}
+        <span style="margin-left:auto;color:var(--muted);font-size:.65rem;">${r.auth ? 'auth' : 'public'}</span>
+      </button>
+    `).join('');
+  }
+
+  function quickTest(path) {
+    document.getElementById('req-method').value = 'GET';
+    document.getElementById('req-path').value = path + '/test';
+    sendRequest();
+  }
+
+  /* ── TABS ── */
+  function switchTab(t) {
+    document.querySelectorAll('.tab-bar .tab').forEach((el, i) => {
+      el.classList.toggle('active', el.textContent.toLowerCase() === t);
+    });
+    document.getElementById('tab-auth').style.display = t === 'auth' ? '' : 'none';
+    document.getElementById('tab-routes').style.display = t === 'routes' ? '' : 'none';
+  }
+
+  function switchAuthMode(mode) {
+    const tabs = document.querySelectorAll('#tab-auth .tab-bar .tab');
+    tabs.forEach(t => t.classList.toggle('active', t.textContent.toLowerCase() === mode));
+    document.getElementById('form-login').style.display = mode === 'login' ? '' : 'none';
+    document.getElementById('form-register').style.display = mode === 'register' ? '' : 'none';
+  }
+
+  /* ── AUTH ── */
+  async function doRegister() {
+    const username = document.getElementById('reg-username').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-pass').value;
+    const msgEl = document.getElementById('reg-msg');
+    try {
+      const r = await fetch('/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email, password })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      msgEl.innerHTML = `<div class="msg ok">Registered! Now log in.</div>`;
+      switchAuthMode('login');
+    } catch(e) {
+      msgEl.innerHTML = `<div class="msg err">${e.message}</div>`;
+    }
+  }
+
+  async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-pass').value;
+    const msgEl = document.getElementById('login-msg');
+    try {
+      const r = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      token = data.token;
+      currentUser = data.user;
+      showLoggedIn();
+    } catch(e) {
+      msgEl.innerHTML = `<div class="msg err">${e.message}</div>`;
+    }
+  }
+
+  async function doLogout() {
+    try {
+      await fetch('/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch(_) {}
+    token = null;
+    currentUser = null;
+    document.getElementById('auth-logged-in').style.display = 'none';
+    document.getElementById('auth-logged-out').style.display = '';
+    document.getElementById('login-msg').innerHTML = '';
+  }
+
+  function showLoggedIn() {
+    document.getElementById('auth-logged-out').style.display = 'none';
+    document.getElementById('auth-logged-in').style.display = '';
+    document.getElementById('logged-in-user').textContent = currentUser.username + ' · ' + currentUser.email;
+    document.getElementById('token-display').textContent = token;
+  }
+
+  /* ── JSON SYNTAX HIGHLIGHTER ── */
+  function highlight(json) {
+    const str = typeof json === 'string' ? json : JSON.stringify(json, null, 2);
+    return str
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+        if (/^"/.test(match)) {
+          return /:$/.test(match)
+            ? `<span class="json-key">${match}</span>`
+            : `<span class="json-str">${match}</span>`;
+        }
+        if (/true|false/.test(match)) return `<span class="json-bool">${match}</span>`;
+        if (/null/.test(match))       return `<span class="json-null">${match}</span>`;
+        return `<span class="json-num">${match}</span>`;
+      });
+  }
+
+  /* ── REQUEST BUILDER ── */
+  async function sendRequest() {
+    const method   = document.getElementById('req-method').value;
+    const path     = document.getElementById('req-path').value.trim();
+    const bodyText = document.getElementById('req-body').value.trim();
+
+    const opts = { method, headers: {} };
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+    if (bodyText && method !== 'GET' && method !== 'HEAD') {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = bodyText;
+    }
+
+    const btn = document.getElementById('send-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Sending…';
+    resetSteps();
+
+    // Hide previous response sections
+    document.getElementById('recv-body-section').style.display  = 'none';
+    document.getElementById('proxy-proof-section').style.display = 'none';
+
+    try {
+      const r    = await fetch(path, opts);
+      const text = await r.text();
+
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch(_) {}
+
+      const area = document.getElementById('response-area');
+      area.style.display = '';
+
+      const cls = r.status < 300 ? 'status-2xx' : r.status < 500 ? 'status-4xx' : 'status-5xx';
+      document.getElementById('response-status').innerHTML =
+        `<span class="status-badge ${cls}">${r.status} ${r.statusText}</span>`;
+
+      // ── Show receivedBody prominently (the message the user sent, echoed back)
+      if (parsed && parsed.receivedBody !== undefined && parsed.receivedBody !== null) {
+        document.getElementById('recv-body-section').style.display = '';
+        document.getElementById('recv-body-box').innerHTML =
+          highlight(JSON.stringify(parsed.receivedBody, null, 2));
+      }
+
+      // ── Show proxy evidence headers
+      if (parsed && parsed.proxyEvidence) {
+        document.getElementById('proxy-proof-section').style.display = '';
+        document.getElementById('proxy-proof-box').innerHTML =
+          highlight(JSON.stringify(parsed.proxyEvidence, null, 2));
+      }
+
+      // ── Full raw response with syntax highlighting
+      const pretty = parsed ? JSON.stringify(parsed, null, 2) : text;
+      document.getElementById('response-body').innerHTML = highlight(pretty);
+
+    } catch(e) {
+      document.getElementById('response-area').style.display = '';
+      document.getElementById('response-status').innerHTML =
+        `<span class="status-badge status-5xx">Network Error</span>`;
+      document.getElementById('response-body').textContent = e.message;
+    }
+
+    btn.disabled  = false;
+    btn.textContent = '▶ Send Request';
+  }
+
+  /* ── FLOW ANIMATION ── */
+  const STEP_ORDER = ['CLIENT_TO_PROXY', 'PROXY_TO_BACKEND', 'BACKEND_TO_PROXY', 'PROXY_TO_CLIENT'];
+
+  function resetSteps() {
+    STEP_ORDER.forEach(s => {
+      const el = document.getElementById(`step-${s}`);
+      if (el) { el.className = 'step-item'; }
+    });
+    ['node-client','node-proxy','node-backend'].forEach(id => {
+      document.getElementById(id).classList.remove('active','error');
+    });
+    ['line-c2p','line-p2b'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.remove('animate','animate-back','animate-err');
+    });
+    document.getElementById('label-c2p').textContent = '—';
+    document.getElementById('label-p2b').textContent = '—';
+  }
+
+  function animateStep(ev) {
+    const stepEl = document.getElementById(`step-${ev.step}`);
+
+    // Mark previous steps done
+    const idx = STEP_ORDER.indexOf(ev.step);
+    STEP_ORDER.forEach((s, i) => {
+      const el = document.getElementById(`step-${s}`);
+      if (!el) return;
+      if (i < idx) { el.className = 'step-item done'; }
+      else if (i === idx) { el.className = 'step-item active'; }
+    });
+
+    if (ev.step === 'CLIENT_TO_PROXY') {
+      document.getElementById('node-client').classList.add('active');
+      document.getElementById('node-proxy').classList.add('active');
+      const line = document.getElementById('line-c2p');
+      pulse(line, 'animate');
+      document.getElementById('label-c2p').textContent = `${ev.method} ${ev.url}`;
+    }
+    if (ev.step === 'PROXY_TO_BACKEND') {
+      document.getElementById('node-proxy').classList.add('active');
+      document.getElementById('node-backend').classList.add('active');
+      document.getElementById('backend-port').textContent = `:${ev.target ? ev.target.split(':')[1] : '???'}`;
+      const line = document.getElementById('line-p2b');
+      pulse(line, 'animate');
+      document.getElementById('label-p2b').textContent = ev.forwardedPath;
+    }
+    if (ev.step === 'BACKEND_TO_PROXY') {
+      const line = document.getElementById('line-p2b');
+      pulse(line, 'animate-back');
+      document.getElementById('label-p2b').textContent = `← ${ev.status}`;
+    }
+    if (ev.step === 'PROXY_TO_CLIENT') {
+      const line = document.getElementById('line-c2p');
+      pulse(line, 'animate-back');
+      document.getElementById('label-c2p').textContent = `← ${ev.status}`;
+      // All done
+      setTimeout(() => {
+        STEP_ORDER.forEach(s => {
+          const el = document.getElementById(`step-${s}`);
+          if (el) el.className = 'step-item done';
+        });
+      }, 700);
+    }
+    if (ev.step === 'PROXY_ERROR') {
+      document.getElementById('node-proxy').classList.add('error');
+      const line = document.getElementById('line-p2b');
+      pulse(line, 'animate-err');
+      if (stepEl) stepEl.className = 'step-item err';
+    }
+  }
+
+  function pulse(el, cls) {
+    el.classList.remove('animate','animate-back','animate-err');
+    void el.offsetWidth; // reflow
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), 700);
+  }
+
+  /* ── EVENT LOG ── */
+  function appendLog(ev) {
+    const log = document.getElementById('event-log');
+    const time = new Date(ev.ts).toLocaleTimeString('en', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+    let detail = '';
+    if (ev.step === 'CLIENT_TO_PROXY')   detail = `${ev.method} ${ev.url}  from ${ev.clientIp}`;
+    if (ev.step === 'PROXY_TO_BACKEND')  detail = `→ ${ev.target}${ev.forwardedPath}  (${ev.method})`;
+    if (ev.step === 'BACKEND_TO_PROXY')  detail = `status ${ev.status}  ${ev.contentLength != null ? ev.contentLength + ' bytes' : ''}`;
+    if (ev.step === 'PROXY_TO_CLIENT')   detail = `status ${ev.status} delivered`;
+    if (ev.step === 'PROXY_ERROR')       detail = `ERROR: ${ev.error}`;
+    if (ev.step === 'CONNECTED')         detail = 'SSE stream established';
+
+    const row = document.createElement('div');
+    row.className = 'log-entry';
+    row.innerHTML = `
+      <span class="log-time">${time}</span>
+      <span class="log-step ${ev.step}">${ev.step}</span>
+      <span class="log-detail">${detail}</span>
+    `;
+    log.prepend(row);
+  }
+
+  function clearLog() {
+    document.getElementById('event-log').innerHTML = '';
+  }
+</script>
+</body>
+</html>
