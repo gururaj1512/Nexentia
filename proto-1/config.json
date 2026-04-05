@@ -1,4 +1,9 @@
 {
+  "server": {
+    "listen_port": 3000,
+    "backend_url": "http://localhost:4001"
+  },
+
   "proxy": {
     "port": 3000,
     "routes": [
@@ -22,11 +27,43 @@
       }
     ]
   },
+
+  "rate_limits": [
+    {
+      "id": "get-getallusers",
+      "path": "/getAllUsers",
+      "method": "GET",
+      "limit": 100,
+      "window_seconds": 60,
+      "description": "Prevent scraping of the user list"
+    },
+    {
+      "id": "post-login",
+      "path": "/login",
+      "method": "POST",
+      "limit": 5,
+      "window_seconds": 60,
+      "description": "Brute-force protection for login endpoint"
+    }
+  ],
+
+  "security": {
+    "block_sql_injection": true,
+    "block_xss": true,
+    "scan_body": true,
+    "scan_query": true,
+    "scan_headers": false,
+    "blacklisted_ips": [
+      "203.0.113.42"
+    ]
+  },
+
   "auth": {
     "jwtSecret": "nexentia",
     "tokenExpiry": "44h",
     "saltRounds": 5
   },
+
   "database": {
     "connectionString": "postgresql://neondb_owner:npg_gbueOAwqz70d@ep-hidden-lab-anb7qt1b-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
     "ssl": true

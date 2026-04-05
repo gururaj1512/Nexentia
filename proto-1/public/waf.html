@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WAF Dashboard — Nexentia Proxy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0f14;
+      --surface:  #141720;
+      --surface2: #1c2030;
+      --surface3: #222435;
+      --border:   #252a3a;
+      --red:      #ef4444;
+      --orange:   #f97316;
+      --yellow:   #f59e0b;
+      --green:    #22c55e;
+      --blue:     #4f8ef7;
+      --purple:   #a78bfa;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --font:     'Segoe UI', system-ui, sans-serif;
+      --mono:     'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    /* ── HEADER ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: .03em; }
+    .pill {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: .7rem;
+      font-family: var(--mono);
+    }
+    .pill-red    { background: #2a0a0a; border: 1px solid #7f1d1d; color: #fca5a5; }
+    .pill-orange { background: #2a1400; border: 1px solid #7c2d12; color: #fdba74; }
+    .pill-purple { background: #1a1040; border: 1px solid #3b1d8a; color: var(--purple); }
+
+    .nav-links { margin-left: auto; display: flex; gap: 8px; }
+    .nav-link {
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: .76rem;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      transition: all .2s;
+    }
+    .nav-link:hover { color: var(--text); border-color: var(--blue); }
+
+    #conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s;
+      margin-left: 8px;
+    }
+    #conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #conn-label { font-size: .74rem; color: var(--muted); }
+
+    /* ── LAYOUT ─────────────────────────────────────────────────────── */
+    .workspace {
+      display: grid;
+      grid-template-columns: 340px 1fr 360px;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    /* ── PANELS ─────────────────────────────────────────────────────── */
+    .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+    .panel:last-child { border-right: none; }
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: .75rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .section-title {
+      font-size: .68rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin-bottom: 10px;
+    }
+    .divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+    /* ── CONFIG CARD ─────────────────────────────────────────────────── */
+    .cfg-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .cfg-card h3 {
+      font-size: .82rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .76rem;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-label { color: var(--muted); }
+    .toggle-val { font-family: var(--mono); font-weight: 700; }
+    .toggle-val.on  { color: var(--green); }
+    .toggle-val.off { color: var(--red); }
+
+    .ip-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: .7rem;
+      font-weight: 700;
+      background: #2a0a0a;
+      border: 1px solid #7f1d1d;
+      color: #fca5a5;
+      margin: 3px 3px 0 0;
+    }
+
+    /* Pattern list */
+    .pattern-list { max-height: 0; overflow: hidden; transition: max-height .3s; }
+    .pattern-list.open { max-height: 500px; }
+    .pattern-row {
+      font-size: .68rem;
+      color: var(--muted);
+      padding: 3px 0;
+      border-bottom: 1px dashed var(--border);
+      font-family: var(--mono);
+    }
+    .pattern-row:last-child { border-bottom: none; }
+    .expand-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: .68rem;
+      color: var(--blue);
+      padding: 4px 0;
+      font-family: var(--font);
+    }
+    .expand-btn:hover { text-decoration: underline; }
+
+    /* ── COUNTERS ────────────────────────────────────────────────────── */
+    .counters {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .counter-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+    .counter-val {
+      font-size: 1.6rem;
+      font-weight: 800;
+      font-family: var(--mono);
+      line-height: 1;
+    }
+    .counter-lbl { font-size: .62rem; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .07em; }
+    .c-sql   .counter-val { color: var(--orange); }
+    .c-xss   .counter-val { color: var(--red); }
+    .c-ip    .counter-val { color: var(--purple); }
+    .c-clean .counter-val { color: var(--green); }
+
+    /* ── INCIDENT FEED ────────────────────────────────────────────────── */
+    .incident-feed { flex: 1; overflow-y: auto; }
+    .incident-feed::-webkit-scrollbar { width: 4px; }
+    .incident-feed::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .incident {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      animation: slideIn .2s ease;
+    }
+    .incident:hover { background: var(--surface2); }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-6px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .inc-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .badge {
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: .64rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .badge-sql   { background: #2a1400; color: var(--orange); border: 1px solid #7c2d12; }
+    .badge-xss   { background: #2a0a0a; color: var(--red);    border: 1px solid #7f1d1d; }
+    .badge-ip    { background: #1a1040; color: var(--purple);  border: 1px solid #3b1d8a; }
+    .badge-clean { background: #0a1a10; color: var(--green);   border: 1px solid #14532d; }
+
+    .inc-time  { font-size: .64rem; color: var(--muted); font-family: var(--mono); }
+    .inc-rule  { font-size: .72rem; color: var(--yellow); margin-bottom: 3px; font-family: var(--mono); }
+    .inc-meta  { font-size: .68rem; color: var(--muted); }
+    .inc-ip    { color: var(--purple); }
+    .inc-field { color: #60a5fa; }
+
+    .payload-box {
+      margin-top: 5px;
+      background: #1a0808;
+      border: 1px solid #3a1414;
+      border-radius: 4px;
+      padding: 5px 8px;
+      font-family: var(--mono);
+      font-size: .64rem;
+      color: #fca5a5;
+      word-break: break-all;
+      max-height: 56px;
+      overflow: hidden;
+    }
+
+    .empty-state {
+      padding: 48px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .empty-state .es-icon { font-size: 2.4rem; margin-bottom: 8px; }
+
+    /* ── RIGHT PANEL — ATTACK TESTER ─────────────────────────────────── */
+    label {
+      display: block;
+      font-size: .73rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    label:first-child { margin-top: 0; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: .78rem;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--blue); }
+    textarea { resize: vertical; min-height: 72px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: .8rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      margin-top: 8px;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active  { transform: scale(.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-red      { background: #7f1d1d; color: #fca5a5; }
+    .btn-orange   { background: #7c2d12; color: #fdba74; }
+    .btn-blue     { background: var(--blue); color: #fff; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .preset-btn {
+      padding: 7px 6px;
+      border-radius: 6px;
+      font-size: .67rem;
+      font-weight: 700;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      text-align: center;
+      transition: all .15s;
+    }
+    .preset-btn:hover { transform: translateY(-1px); }
+    .preset-sql  { background: #1a0a00; border-color: #7c2d12; color: #fdba74; }
+    .preset-xss  { background: #1a0808; border-color: #7f1d1d; color: #fca5a5; }
+    .preset-ip   { background: #0f0a20; border-color: #3b1d8a; color: var(--purple); }
+    .preset-clean { background: #081a10; border-color: #14532d; color: var(--green); }
+
+    .result-box {
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: .74rem;
+      margin-top: 10px;
+      line-height: 1.6;
+      display: none;
+    }
+    .result-box.show { display: block; }
+    .res-blocked { background: #1a0808; border: 1px solid var(--red);   color: #fca5a5; }
+    .res-allowed { background: #081a10; border: 1px solid var(--green); color: #86efac; }
+    .res-error   { background: #1a1400; border: 1px solid var(--yellow); color: #fde68a; }
+
+    /* Status strip */
+    .status-strip {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      border-top: 1px solid var(--border);
+      font-size: .68rem;
+      color: var(--muted);
+      display: flex;
+      gap: 16px;
+      background: var(--surface);
+    }
+    .status-strip b { color: var(--text); }
+
+    .tab-bar { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .tab {
+      padding: 10px 14px; font-size: .75rem; font-weight: 600;
+      color: var(--muted); cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+    }
+    .tab.active { color: var(--red); border-bottom-color: var(--red); }
+
+    .clear-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: .7rem; margin-left: auto;
+      font-family: var(--font);
+    }
+    .clear-btn:hover { color: var(--text); }
+
+    @media (max-width: 1200px) {
+      .workspace { grid-template-columns: 300px 1fr 320px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🛡️ WAF Dashboard</h1>
+  <span class="pill pill-red">SQL Injection Block</span>
+  <span class="pill pill-orange">XSS Block</span>
+  <span class="pill pill-purple">IP Blacklist</span>
+  <div id="conn-dot"></div>
+  <span id="conn-label">Connecting…</span>
+  <nav class="nav-links">
+    <a class="nav-link" href="/rate-limits.html">⚡ Rate Limiter</a>
+    <a class="nav-link" href="/">← Proxy Engine</a>
+  </nav>
+</header>
+
+<div class="workspace">
+
+  <!-- ── LEFT: Security Config ── -->
+  <div class="panel">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchLeft('config')">Config</div>
+      <div class="tab" onclick="switchLeft('patterns')">Patterns</div>
+    </div>
+
+    <!-- Config Tab -->
+    <div id="tab-config" class="panel-body">
+      <div id="security-config">
+        <div style="color:var(--muted);font-size:.78rem;">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Patterns Tab -->
+    <div id="tab-patterns" class="panel-body" style="display:none">
+      <div class="section-title">SQL Injection Signatures</div>
+      <div id="sql-patterns-list"></div>
+      <div class="divider"></div>
+      <div class="section-title">XSS Signatures</div>
+      <div id="xss-patterns-list"></div>
+    </div>
+  </div>
+
+  <!-- ── MIDDLE: Live Attack Feed ── -->
+  <div class="panel">
+    <div class="panel-header">
+      🔴 Live Attack Feed
+      <span style="font-size:.64rem;font-weight:400;color:var(--muted);">(SSE)</span>
+      <button class="clear-btn" onclick="clearFeed()">clear</button>
+    </div>
+
+    <div class="counters">
+      <div class="counter-card c-sql">
+        <div class="counter-val" id="cnt-sql">0</div>
+        <div class="counter-lbl">SQL Injections</div>
+      </div>
+      <div class="counter-card c-xss">
+        <div class="counter-val" id="cnt-xss">0</div>
+        <div class="counter-lbl">XSS Attacks</div>
+      </div>
+      <div class="counter-card c-ip">
+        <div class="counter-val" id="cnt-ip">0</div>
+        <div class="counter-lbl">IP Blacklist</div>
+      </div>
+      <div class="counter-card c-clean">
+        <div class="counter-val" id="cnt-clean">0</div>
+        <div class="counter-lbl">Passed Clean</div>
+      </div>
+    </div>
+
+    <div class="incident-feed" id="incident-feed">
+      <div class="empty-state">
+        <div class="es-icon">🛡️</div>
+        <div>No attacks detected yet.</div>
+        <div style="margin-top:4px;font-size:.72rem;">Use the Attack Tester → to fire payloads.</div>
+      </div>
+    </div>
+
+    <div class="status-strip">
+      <span>Total blocked: <b id="s-blocked" style="color:var(--red)">0</b></span>
+      <span>Clean: <b id="s-clean" style="color:var(--green)">0</b></span>
+      <span>Block rate: <b id="s-rate">0%</b></span>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Attack Tester ── -->
+  <div class="panel">
+    <div class="panel-header">🧪 Attack Tester</div>
+    <div class="panel-body">
+
+      <div class="section-title">Preset Payloads</div>
+      <div class="preset-grid" id="preset-grid">
+        <!-- injected by JS -->
+      </div>
+
+      <label>Attack vector (JSON body or query string)</label>
+      <textarea id="test-payload" rows="4" placeholder='{"username": "admin'\'' OR 1=1 --"}'></textarea>
+
+      <label>Target URL path</label>
+      <input type="text" id="test-path" value="/auth/login" />
+
+      <label>Method</label>
+      <select id="test-method">
+        <option>POST</option>
+        <option>GET</option>
+        <option>PUT</option>
+        <option>PATCH</option>
+      </select>
+
+      <button class="btn btn-red" id="fire-btn" onclick="fireAttack()">
+        ⚠ Fire Test Attack
+      </button>
+      <button class="btn btn-secondary" onclick="resetTest()">✕ Reset</button>
+
+      <div id="test-result" class="result-box"></div>
+
+      <div class="divider"></div>
+      <div class="section-title">WAF Response Headers</div>
+      <div style="font-size:.71rem;color:var(--muted);line-height:1.8;">
+        Blocked SQL / XSS:<br>
+        <code style="color:var(--red);">HTTP 400 Bad Request</code><br>
+        <code style="color:#60a5fa;">{ error, reason, type, field, blocked }</code>
+        <br><br>
+        Blacklisted IP:<br>
+        <code style="color:var(--red);">HTTP 403 Forbidden</code><br>
+        <code style="color:#60a5fa;">{ error, reason, ip }</code>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Middleware Order</div>
+      <div style="font-size:.71rem;color:var(--muted);line-height:2;">
+        <span style="color:var(--red);">① WAF</span> — blacklist + payload scan<br>
+        <span style="color:var(--orange);">② Rate Limiter</span> — per-IP per-endpoint<br>
+        <span style="color:var(--purple);">③ Auth</span> — JWT verification<br>
+        <span style="color:var(--green);">④ Proxy Router</span> — forward to backend
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  /* ── COUNTERS ─────────────────────────────────────────────────────── */
+  let cntSql = 0, cntXss = 0, cntIp = 0, cntClean = 0, cntTotal = 0;
+
+  function updateCounters() {
+    document.getElementById('cnt-sql').textContent   = cntSql;
+    document.getElementById('cnt-xss').textContent   = cntXss;
+    document.getElementById('cnt-ip').textContent    = cntIp;
+    document.getElementById('cnt-clean').textContent = cntClean;
+    document.getElementById('s-blocked').textContent = cntSql + cntXss + cntIp;
+    document.getElementById('s-clean').textContent   = cntClean;
+    const blocked = cntSql + cntXss + cntIp;
+    const pct = cntTotal > 0 ? Math.round((blocked / cntTotal) * 100) : 0;
+    document.getElementById('s-rate').textContent = pct + '%';
+  }
+
+  /* ── SSE ─────────────────────────────────────────────────────────── */
+  let es;
+  function connectSSE() {
+    es = new EventSource('/waf-events');
+    es.onopen = () => {
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-label').textContent = 'Live';
+    };
+    es.onerror = () => {
+      document.getElementById('conn-dot').classList.remove('live');
+      document.getElementById('conn-label').textContent = 'Reconnecting…';
+    };
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      handleEvent(ev);
+    };
+  }
+  connectSSE();
+
+  function handleEvent(ev) {
+    if (ev.type === 'CONNECTED') return;
+    cntTotal++;
+    if (ev.type === 'BLOCKED') {
+      if (ev.type2 === 'SQL_INJECTION' || ev.wafType === 'SQL_INJECTION' || ev.type === 'BLOCKED' && ev.blockType === 'SQL_INJECTION') {
+        // handled below
+      }
+      // Use ev.type from the inner payload
+      const t = ev.attackType || ev.wafType || ev.blockType || ev.t || '';
+      if (ev.type === 'BLOCKED') {
+        const inner = ev;
+        if (inner.type === 'SQL_INJECTION' || inner.type === 'BLOCKED' && inner.rule && inner.rule.includes('SQL')) cntSql++;
+        else if (inner.type === 'XSS') cntXss++;
+        else if (inner.type === 'IP_BLACKLIST') cntIp++;
+        // re-check using the actual field from the event
+        const actualType = inner.type; // comes from waf:blocked emit
+        if (actualType === 'SQL_INJECTION') { if (cntSql === 0 || true) {} }
+      }
+      appendIncident(ev);
+    } else if (ev.type === 'ALLOWED') {
+      cntClean++;
+    }
+    updateCounters();
+  }
+
+  /* The server emits: { type:'BLOCKED', ts, ip, method, url, type (attack type), field, rule, payload }
+     We need to distinguish attackType from the SSE envelope type.
+     Let's fix: the middleware emits waf:blocked with { type:'SQL_INJECTION'|'XSS'|'IP_BLACKLIST', ... }
+     index.js wraps as { type:'BLOCKED', ...d }
+     So ev.type === 'BLOCKED', and inside ev we have the original fields including ev.type which got overwritten.
+     We need to look at ev differently. */
+
+  function handleEvent(ev) { // override
+    if (ev.type === 'CONNECTED') return;
+    cntTotal++;
+    if      (ev.type === 'SQL_INJECTION') { cntSql++; appendIncident(ev); }
+    else if (ev.type === 'XSS')           { cntXss++; appendIncident(ev); }
+    else if (ev.type === 'IP_BLACKLIST')  { cntIp++;  appendIncident(ev); }
+    else if (ev.type === 'ALLOWED')       { cntClean++; }
+    updateCounters();
+  }
+
+  /* ── INCIDENT FEED ───────────────────────────────────────────────── */
+  function appendIncident(ev) {
+    const feed = document.getElementById('incident-feed');
+    const ph   = feed.querySelector('.empty-state');
+    if (ph) ph.remove();
+
+    const time = new Date(ev.ts).toLocaleTimeString('en', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    let badgeCls, badgeLabel;
+    if      (ev.type === 'SQL_INJECTION') { badgeCls = 'badge-sql'; badgeLabel = 'SQL INJECTION'; }
+    else if (ev.type === 'XSS')           { badgeCls = 'badge-xss'; badgeLabel = 'XSS ATTACK'; }
+    else                                  { badgeCls = 'badge-ip';  badgeLabel = 'IP BLACKLIST'; }
+
+    const fieldHtml   = ev.field   ? ' &nbsp;&middot;&nbsp; field: <span class="inc-field">' + escHtml(ev.field) + '</span>' : '';
+    const payloadHtml = ev.payload ? '<div class="payload-box">' + escHtml(ev.payload) + '</div>' : '';
+
+    const el = document.createElement('div');
+    el.className = 'incident';
+    el.innerHTML =
+      '<div class="inc-header">' +
+        '<span class="badge ' + badgeCls + '">' + badgeLabel + '</span>' +
+        '<span class="inc-time">' + time + '</span>' +
+      '</div>' +
+      '<div class="inc-rule">&#9658; ' + escHtml(ev.rule || 'Blacklisted IP') + '</div>' +
+      '<div class="inc-meta">' +
+        'IP: <span class="inc-ip">' + escHtml(ev.ip) + '</span> &nbsp;&middot;&nbsp; ' +
+        ev.method + ' <span style="color:var(--text)">' + escHtml(ev.url) + '</span>' + fieldHtml +
+      '</div>' + payloadHtml;
+
+    feed.prepend(el);
+    const rows = feed.querySelectorAll('.incident');
+    if (rows.length > 150) rows[rows.length - 1].remove();
+  }
+
+  function clearFeed() {
+    document.getElementById('incident-feed').innerHTML =
+      '<div class="empty-state"><div class="es-icon">&#128737;</div><div>Feed cleared.</div></div>';
+    cntSql = cntXss = cntIp = cntClean = cntTotal = 0;
+    updateCounters();
+  }
+
+  function escHtml(str) {
+    return String(str || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── LOAD CONFIG ─────────────────────────────────────────────────── */
+  function loadConfig() {
+    fetch('/waf-config')
+      .then(r => r.json())
+      .then(cfg => { renderConfig(cfg); renderPatterns(cfg); })
+      .catch(e => console.error(e));
+  }
+  loadConfig();
+
+  function renderConfig(cfg) {
+    const el = document.getElementById('security-config');
+    const boolRow = (v, label) =>
+      '<div class="toggle-row">' +
+        '<span class="toggle-label">' + label + '</span>' +
+        '<span class="toggle-val ' + (v ? 'on' : 'off') + '">' + (v ? '&#10003; ON' : '&#10007; OFF') + '</span>' +
+      '</div>';
+
+    const ips = (cfg.blacklisted_ips || [])
+      .map(ip => '<span class="ip-chip">&#128683; ' + escHtml(ip) + '</span>')
+      .join('') || '<span style="color:var(--muted);font-size:.72rem;">None configured</span>';
+
+    el.innerHTML =
+      '<div class="cfg-card">' +
+        '<h3>&#128274; Attack Prevention</h3>' +
+        boolRow(cfg.block_sql_injection, 'SQL Injection Block') +
+        boolRow(cfg.block_xss,           'XSS Block') +
+        boolRow(cfg.scan_body,           'Scan Request Body') +
+        boolRow(cfg.scan_query,          'Scan Query Params') +
+        boolRow(cfg.scan_headers,        'Scan Headers') +
+      '</div>' +
+      '<div class="cfg-card">' +
+        '<h3>&#128683; IP Blacklist</h3>' +
+        '<div style="margin-top:4px;">' + ips + '</div>' +
+        '<div style="margin-top:8px;font-size:.68rem;color:var(--muted);">' +
+          'Edit <code>config.json &rarr; security.blacklisted_ips[]</code> and restart.' +
+        '</div>' +
+      '</div>' +
+      '<div class="cfg-card">' +
+        '<h3>&#128203; Signature Counts</h3>' +
+        '<div class="toggle-row"><span class="toggle-label">SQL Injection rules</span>' +
+          '<span class="toggle-val" style="color:var(--orange);">' + (cfg.sql_rules||[]).length + '</span></div>' +
+        '<div class="toggle-row"><span class="toggle-label">XSS rules</span>' +
+          '<span class="toggle-val" style="color:var(--red);">' + (cfg.xss_rules||[]).length + '</span></div>' +
+      '</div>' +
+      '<div class="cfg-card" style="border-left:3px solid var(--blue);padding-left:13px;">' +
+        '<h3 style="font-size:.74rem;color:var(--muted);margin-bottom:6px;">Config Location</h3>' +
+        '<code style="font-size:.68rem;color:#60a5fa;">config.json &rarr; security.*</code>' +
+        '<div style="margin-top:6px;font-size:.68rem;color:var(--muted);line-height:1.6;">' +
+          'block_sql_injection, block_xss,<br>scan_body, scan_query, blacklisted_ips[]' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderPatterns(cfg) {
+    const sqlEl = document.getElementById('sql-patterns-list');
+    const xssEl = document.getElementById('xss-patterns-list');
+    sqlEl.innerHTML = (cfg.sql_rules||[]).map((r,i) =>
+      '<div class="pattern-row"><span style="color:var(--orange);">' + (i+1) + '.</span> ' + escHtml(r) + '</div>'
+    ).join('');
+    xssEl.innerHTML = (cfg.xss_rules||[]).map((r,i) =>
+      '<div class="pattern-row"><span style="color:var(--red);">' + (i+1) + '.</span> ' + escHtml(r) + '</div>'
+    ).join('');
+  }
+
+  /* ── TAB SWITCH ──────────────────────────────────────────────────── */
+  function switchLeft(t) {
+    document.querySelectorAll('.tab-bar .tab').forEach(el =>
+      el.classList.toggle('active', el.textContent.toLowerCase().trim() === t)
+    );
+    document.getElementById('tab-config').style.display   = t === 'config'   ? '' : 'none';
+    document.getElementById('tab-patterns').style.display = t === 'patterns' ? '' : 'none';
+  }
+
+  /* ── PRESET PAYLOADS ─────────────────────────────────────────────── */
+  const PRESETS = [
+    { label: "' OR 1=1 --",     cls: 'preset-sql',   method: 'POST', path: '/auth/login',
+      body: '{\n  "username": "admin",\n  "password": "\' OR 1=1 --"\n}' },
+    { label: 'UNION SELECT',    cls: 'preset-sql',   method: 'GET',
+      path: '/api/v1/getAllUsers?id=1%20UNION%20SELECT%20*%20FROM%20users--', body: '' },
+    { label: 'DROP TABLE',      cls: 'preset-sql',   method: 'POST', path: '/api/v1/data',
+      body: '{\n  "query": "\'; DROP TABLE users; --"\n}' },
+    { label: 'SLEEP() blind',   cls: 'preset-sql',   method: 'POST', path: '/auth/login',
+      body: '{\n  "username": "1\'; SELECT SLEEP(5)--"\n}' },
+    { label: 'script tag',      cls: 'preset-xss',   method: 'POST', path: '/api/v1/comment',
+      body: '{\n  "comment": "<script>alert(1)<\\/script>"\n}' },
+    { label: 'img onerror',     cls: 'preset-xss',   method: 'POST', path: '/api/v1/post',
+      body: '{\n  "title": "<img src=x onerror=alert(1)>"\n}' },
+    { label: 'javascript: URI', cls: 'preset-xss',   method: 'POST', path: '/api/v1/profile',
+      body: '{\n  "website": "javascript:alert(1)"\n}' },
+    { label: 'SVG onload',      cls: 'preset-xss',   method: 'POST', path: '/api/v1/bio',
+      body: '{\n  "bio": "<svg onload=alert(1)>"\n}' },
+    { label: 'Blacklist IP',    cls: 'preset-ip',    method: 'GET',  path: '/health', body: '' },
+    { label: 'Clean GET',       cls: 'preset-clean', method: 'GET',  path: '/health', body: '' }
+  ];
+
+  function buildPresets() {
+    const grid = document.getElementById('preset-grid');
+    grid.innerHTML = PRESETS.map((p, i) =>
+      '<div class="preset-btn ' + p.cls + '" onclick="loadPreset(' + i + ')">' + escHtml(p.label) + '</div>'
+    ).join('');
+  }
+  buildPresets();
+
+  function loadPreset(i) {
+    const p = PRESETS[i];
+    document.getElementById('test-method').value  = p.method;
+    document.getElementById('test-path').value    = p.path;
+    document.getElementById('test-payload').value = p.body;
+  }
+
+  /* ── ATTACK TESTER ───────────────────────────────────────────────── */
+  async function fireAttack() {
+    const method  = document.getElementById('test-method').value;
+    const urlPath = document.getElementById('test-path').value.trim();
+    const payload = document.getElementById('test-payload').value.trim();
+    const btn     = document.getElementById('fire-btn');
+    const resEl   = document.getElementById('test-result');
+
+    btn.disabled    = true;
+    btn.textContent = 'Firing...';
+    resEl.className = 'result-box';
+    resEl.style.display = 'none';
+
+    const opts = { method, headers: {} };
+    if (method !== 'GET' && method !== 'HEAD' && payload) {
+      try { JSON.parse(payload); }
+      catch(_) {
+        resEl.className = 'result-box show res-error';
+        resEl.textContent = 'Invalid JSON in payload field.';
+        btn.disabled = false;
+        btn.textContent = 'Fire Test Attack';
+        return;
+      }
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = payload;
+    }
+
+    try {
+      const r    = await fetch(urlPath, opts);
+      const text = await r.text();
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch(_) {}
+
+      resEl.style.display = 'block';
+
+      if (r.status === 400 || r.status === 403) {
+        resEl.className = 'result-box show res-blocked';
+        const reason = parsed?.reason || parsed?.error || text;
+        const type   = parsed?.type || (r.status === 403 ? 'IP_BLACKLIST' : 'PAYLOAD');
+        const rule   = parsed?.blocked || '—';
+        resEl.textContent =
+          `🚫 BLOCKED  HTTP ${r.status}\n` +
+          `Type:   ${type}\n` +
+          `Reason: ${reason}\n` +
+          `Rule:   ${rule}`;
+      } else {
+        resEl.className = 'result-box show res-allowed';
+        resEl.textContent =
+          `✅ ALLOWED  HTTP ${r.status}\n` +
+          `Response: ${text.slice(0, 300)}`;
+      }
+    } catch(e) {
+      resEl.className = 'result-box show res-error';
+      resEl.textContent = `⚠ Network error: ${e.message}\n(Is the proxy server running?)`;
+    }
+
+    btn.disabled    = false;
+    btn.textContent = '⚠ Fire Test Attack';
+  }
+
+  function resetTest() {
+    document.getElementById('test-payload').value = '';
+    document.getElementById('test-path').value = '/auth/login';
+    document.getElementById('test-method').value = 'POST';
+    document.getElementById('test-result').style.display = 'none';
+  }
+</script>
+</body>
+</html>

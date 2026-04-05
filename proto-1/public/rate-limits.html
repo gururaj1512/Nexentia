@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rate Limiter — Nexentia Proxy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0f14;
+      --surface:  #141720;
+      --surface2: #1c2030;
+      --surface3: #222840;
+      --border:   #252a3a;
+      --accent:   #4f8ef7;
+      --accent2:  #7c3aed;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --orange:   #f97316;
+      --yellow:   #f59e0b;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --font:     'Segoe UI', system-ui, sans-serif;
+      --mono:     'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    /* ── HEADER ─────────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: .03em; }
+    .pill {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: .72rem;
+      padding: 3px 10px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .pill.algo {
+      background: #1a1040;
+      border-color: #3b1d8a;
+      color: #a78bfa;
+    }
+    .nav-back {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .78rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color .2s;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .nav-back:hover { color: var(--text); border-color: var(--accent); }
+    #conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s;
+      margin-left: 12px;
+    }
+    #conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #conn-label { font-size: .75rem; color: var(--muted); }
+
+    /* ── LAYOUT ─────────────────────────────────────────────────────────── */
+    .workspace {
+      display: grid;
+      grid-template-columns: 360px 1fr 340px;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    /* ── PANELS ─────────────────────────────────────────────────────────── */
+    .panel {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel:last-child { border-right: none; }
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── RULE CARDS ─────────────────────────────────────────────────────── */
+    .rule-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color .25s;
+    }
+    .rule-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 3px; height: 100%;
+      background: var(--accent);
+      border-radius: 10px 0 0 10px;
+    }
+    .rule-card.danger::before { background: var(--red); }
+    .rule-card:hover { border-color: var(--accent2); }
+
+    .rule-name {
+      font-size: .88rem;
+      font-weight: 700;
+      font-family: var(--mono);
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .rule-desc {
+      font-size: .74rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .rule-meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .meta-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: .68rem;
+      font-weight: 700;
+      font-family: var(--mono);
+    }
+    .chip-limit  { background: #1a2a1a; color: var(--green);  border: 1px solid #14532d; }
+    .chip-window { background: #1a2030; color: #60a5fa; border: 1px solid #1e3a5f; }
+    .chip-method { background: #2a1a10; color: var(--orange); border: 1px solid #7c2d12; }
+    .chip-algo   { background: #1a1040; color: #a78bfa; border: 1px solid #3b1d8a; }
+
+    /* ── USAGE BAR ─────────────────────────────────────────────────────── */
+    .usage-section { margin-top: 8px; }
+    .usage-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: .68rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .usage-bar-track {
+      height: 6px;
+      background: var(--surface3);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .usage-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--green), #86efac);
+      transition: width .5s ease, background .3s;
+    }
+    .usage-bar-fill.warn  { background: linear-gradient(90deg, var(--yellow), #fde68a); }
+    .usage-bar-fill.danger { background: linear-gradient(90deg, var(--red), #fca5a5); }
+
+    .top-ips {
+      margin-top: 8px;
+    }
+    .ip-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: .72rem;
+    }
+    .ip-row:last-child { border-bottom: none; }
+    .ip-addr { font-family: var(--mono); color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .ip-count { font-family: var(--mono); font-weight: 700; color: var(--accent); min-width: 28px; text-align: right; }
+    .ip-blocked { color: var(--red); font-weight: 700; }
+    .ip-bar-track { flex: 1; height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden; }
+    .ip-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .4s; }
+    .ip-bar-fill.blocked { background: var(--red); }
+
+    /* ── INCIDENT FEED ─────────────────────────────────────────────────── */
+    .incident-feed {
+      flex: 1;
+      overflow-y: auto;
+      font-family: var(--mono);
+      font-size: .72rem;
+    }
+    .incident-feed::-webkit-scrollbar { width: 4px; }
+    .incident-feed::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .incident {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      animation: slideIn .2s ease;
+      transition: background .15s;
+    }
+    .incident:hover { background: var(--surface2); }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .inc-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .inc-badge {
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .inc-429  { background: #3a1414; color: var(--red);    border: 1px solid #7f1d1d; }
+    .inc-ok   { background: #0f2a1a; color: var(--green);  border: 1px solid #14532d; }
+    .inc-tick { background: #131a35; color: #60a5fa;        border: 1px solid #1e3a5f; }
+
+    .inc-time { color: var(--muted); font-size: .65rem; }
+    .inc-rule { color: var(--yellow); font-size: .7rem; margin-bottom: 2px; }
+    .inc-detail { color: var(--muted); font-size: .68rem; }
+    .inc-ip { color: #c4b5fd; }
+
+    .empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .empty-state .icon { font-size: 2rem; margin-bottom: 8px; }
+
+    /* ── RIGHT PANEL: SIMULATOR ─────────────────────────────────────────── */
+    .sim-section { margin-bottom: 20px; }
+    .section-title {
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      font-size: .74rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    label:first-child { margin-top: 0; }
+    input, select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: .82rem;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: .82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: #fff; width: 100%; margin-top: 10px; }
+    .btn-danger  { background: var(--red);  color: #fff; width: 100%; margin-top: 6px; }
+    .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); width: 100%; margin-top: 6px; }
+    .divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+    .sim-result {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: .74rem;
+      margin-top: 10px;
+      display: none;
+    }
+    .sim-result.show { display: block; }
+    .sim-429 { border-color: var(--red);  color: var(--red);  background: #1a0808; }
+    .sim-200 { border-color: var(--green); color: var(--green); background: #081a10; }
+    .sim-err { border-color: var(--yellow); color: var(--yellow); background: #1a1208; }
+
+    /* Progress ring */
+    .counters {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .counter-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .counter-val {
+      font-size: 1.6rem;
+      font-weight: 800;
+      font-family: var(--mono);
+      line-height: 1;
+    }
+    .counter-lbl { font-size: .65rem; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: .08em; }
+    .counter-card.blocked-card .counter-val { color: var(--red); }
+    .counter-card.allowed-card .counter-val { color: var(--green); }
+    .counter-card.ips-card     .counter-val { color: #a78bfa; }
+    .counter-card.rate-card    .counter-val { color: var(--yellow); }
+
+    /* Algorithm explainer */
+    .algo-box {
+      background: #0d0a1f;
+      border: 1px solid #2d1f5e;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: .74rem;
+      line-height: 1.65;
+      color: #c4b5fd;
+      margin-bottom: 12px;
+    }
+    .algo-box h3 {
+      font-size: .76rem;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-bottom: 8px;
+      letter-spacing: .04em;
+    }
+    .algo-box ol { padding-left: 16px; }
+    .algo-box ol li { margin-bottom: 3px; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .tab {
+      padding: 10px 14px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* Log toggle in middle panel header */
+    .clear-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: .7rem;
+      margin-left: auto;
+      padding: 0;
+      font-family: var(--font);
+    }
+    .clear-btn:hover { color: var(--text); }
+
+    /* Status bar */
+    .status-strip {
+      flex-shrink: 0;
+      padding: 8px 16px;
+      border-top: 1px solid var(--border);
+      font-size: .68rem;
+      color: var(--muted);
+      display: flex;
+      gap: 16px;
+      background: var(--surface);
+    }
+    .status-strip span b { color: var(--text); }
+
+    @media (max-width: 1100px) {
+      .workspace { grid-template-columns: 320px 1fr 300px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ Rate Limiter</h1>
+  <span class="pill">Sliding Window Log</span>
+  <span class="pill algo">Per-IP · Per-Endpoint</span>
+  <div id="conn-dot"></div>
+  <span id="conn-label" style="font-size:.75rem;color:var(--muted);">Connecting…</span>
+  <a class="nav-back" href="/">← Proxy Engine</a>
+</header>
+
+<div class="workspace">
+
+  <!-- ── LEFT: Rules + Top IPs ── -->
+  <div class="panel">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchLeftTab('rules')">Rules</div>
+      <div class="tab" onclick="switchLeftTab('algo')">Algorithm</div>
+    </div>
+
+    <!-- Rules Tab -->
+    <div id="tab-rules" class="panel-body">
+      <div id="rules-container">
+        <div style="color:var(--muted);font-size:.78rem;">Loading rules…</div>
+      </div>
+    </div>
+
+    <!-- Algorithm Tab -->
+    <div id="tab-algo" class="panel-body" style="display:none">
+      <div class="algo-box">
+        <h3>Sliding Window Log (SWL)</h3>
+        <ol>
+          <li>Every allowed request appends a timestamp to a per-(IP, endpoint) log.</li>
+          <li>On each incoming request, timestamps older than <b>windowMs</b> are evicted from the front of the log.</li>
+          <li>If <b>log.length ≥ limit</b> → reject 429 immediately, before any proxy forwarding.</li>
+          <li>Otherwise allow: push current timestamp and continue.</li>
+        </ol>
+      </div>
+      <div class="algo-box" style="margin-top:10px;color:#86efac;background:#081a10;border-color:#14532d;">
+        <h3 style="color:#22c55e;">Why SWL over Token Bucket?</h3>
+        <ol>
+          <li><b>Exact</b> — no approximation error; every request in the window is counted precisely.</li>
+          <li><b>Burst-safe</b> — a burst at t=59s doesn't reset at t=60s; the window slides continuously.</li>
+          <li><b>Brute-force proof</b> — perfect fit for the POST /login 5 req/min rule.</li>
+        </ol>
+      </div>
+      <div class="algo-box" style="margin-top:10px;color:#fca5a5;background:#1a0808;border-color:#7f1d1d;">
+        <h3 style="color:#ef4444;">Trade-off</h3>
+        <p style="margin-top:4px;">Memory: O(limit) timestamps per active key. For 100 req/min rules at high traffic, consider Redis for multi-node deployments.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MIDDLE: Live Incident Feed ── -->
+  <div class="panel" style="border-right:1px solid var(--border);">
+    <div class="panel-header">
+      Live Incident Feed
+      <span style="font-size:.65rem;font-weight:400;color:var(--muted);">(SSE)</span>
+      <button class="clear-btn" onclick="clearFeed()">clear</button>
+    </div>
+
+    <!-- Summary counters -->
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <div class="counters">
+        <div class="counter-card blocked-card">
+          <div class="counter-val" id="cnt-blocked">0</div>
+          <div class="counter-lbl">Blocked (429)</div>
+        </div>
+        <div class="counter-card allowed-card">
+          <div class="counter-val" id="cnt-allowed">0</div>
+          <div class="counter-lbl">Allowed</div>
+        </div>
+        <div class="counter-card ips-card">
+          <div class="counter-val" id="cnt-ips">0</div>
+          <div class="counter-lbl">Unique IPs</div>
+        </div>
+        <div class="counter-card rate-card">
+          <div class="counter-val" id="cnt-rate">0/m</div>
+          <div class="counter-lbl">Block Rate</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="incident-feed" id="incident-feed">
+      <div class="empty-state">
+        <div class="icon">🛡️</div>
+        <div>No rate-limit events yet.</div>
+        <div style="margin-top:4px;font-size:.72rem;">Use the simulator → to trigger events.</div>
+      </div>
+    </div>
+
+    <div class="status-strip" id="status-strip">
+      <span>Rules active: <b id="s-rules">—</b></span>
+      <span>Blocked: <b id="s-blocked" style="color:var(--red)">0</b></span>
+      <span>Allowed: <b id="s-allowed" style="color:var(--green)">0</b></span>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Simulator + Flush ── -->
+  <div class="panel">
+    <div class="panel-header">Burst Simulator</div>
+    <div class="panel-body">
+
+      <div class="section-title">Fire Requests</div>
+      <div class="sim-section">
+        <label>Target Endpoint</label>
+        <select id="sim-endpoint">
+          <option value="POST /auth/login">POST /auth/login (limit: 5/min)</option>
+          <option value="GET /api/v1/getAllUsers">GET /api/v1/getAllUsers (limit: 100/min)</option>
+          <option value="GET /health">GET /health (no limit)</option>
+        </select>
+
+        <label>Number of requests to fire</label>
+        <input type="number" id="sim-count" value="7" min="1" max="200" />
+
+        <label>Delay between requests (ms)</label>
+        <input type="number" id="sim-delay" value="80" min="0" max="5000" />
+
+        <button class="btn btn-primary" id="sim-btn" onclick="runSimulator()">
+          ▶ Fire Burst
+        </button>
+        <button class="btn btn-secondary" onclick="resetSimulator()">
+          ✕ Reset
+        </button>
+
+        <div id="sim-result" class="sim-result"></div>
+        <div id="sim-progress" style="display:none;margin-top:10px;">
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">Progress</div>
+          <div style="background:var(--surface3);border-radius:4px;height:6px;overflow:hidden;">
+            <div id="sim-prog-bar" style="height:100%;width:0%;background:var(--accent);transition:width .15s;border-radius:4px;"></div>
+          </div>
+          <div id="sim-prog-label" style="font-size:.68rem;color:var(--muted);margin-top:4px;"></div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Manual Flush</div>
+      <div class="sim-section">
+        <label>Flush key (leave blank to flush ALL)</label>
+        <input type="text" id="flush-key" placeholder="post-login:127.0.0.1" />
+        <button class="btn btn-danger" onclick="doFlush()">🗑 Flush Counter(s)</button>
+        <div id="flush-result" style="font-size:.72rem;color:var(--muted);margin-top:6px;"></div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Response Headers</div>
+      <div style="font-size:.73rem;color:var(--muted);line-height:1.7;">
+        Every matched request receives:<br>
+        <code style="color:#60a5fa;">X-RateLimit-Limit</code> — max requests<br>
+        <code style="color:#60a5fa;">X-RateLimit-Remaining</code> — quota left<br>
+        <code style="color:#60a5fa;">X-RateLimit-Reset</code> — UNIX epoch reset time<br>
+        <code style="color:#60a5fa;">X-RateLimit-Window</code> — window length<br>
+        <code style="color:var(--red);">Retry-After</code> — seconds until retry (429 only)
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  /* ── GLOBAL STATE ────────────────────────────────────────────────────── */
+  let cntBlocked = 0;
+  let cntAllowed = 0;
+  const seenIps  = new Set();
+  const blockTimes = []; // for block-rate calc (last 60s)
+
+  /* ── SSE CONNECTION ─────────────────────────────────────────────────── */
+  let es;
+  function connectSSE() {
+    es = new EventSource('/rl-events');
+    es.onopen = () => {
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-label').textContent = 'Live';
+    };
+    es.onerror = () => {
+      document.getElementById('conn-dot').classList.remove('live');
+      document.getElementById('conn-label').textContent = 'Reconnecting…';
+    };
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      handleEvent(ev);
+    };
+  }
+  connectSSE();
+
+  /* ── EVENT HANDLER ───────────────────────────────────────────────────── */
+  function handleEvent(ev) {
+    if (ev.type === 'CONNECTED') return;
+
+    if (ev.type === 'BLOCKED') {
+      cntBlocked++;
+      seenIps.add(ev.ip);
+      blockTimes.push(Date.now());
+      appendIncident(ev, 'blocked');
+      updateCounters();
+      refreshRuleCards();
+    } else if (ev.type === 'TICK') {
+      cntAllowed++;
+      seenIps.add(ev.ip);
+      appendIncident(ev, 'tick');
+      updateCounters();
+    }
+  }
+
+  function updateCounters() {
+    document.getElementById('cnt-blocked').textContent = cntBlocked;
+    document.getElementById('cnt-allowed').textContent = cntAllowed;
+    document.getElementById('cnt-ips').textContent     = seenIps.size;
+    document.getElementById('s-blocked').textContent   = cntBlocked;
+    document.getElementById('s-allowed').textContent   = cntAllowed;
+
+    // Block rate: blocks in last 60s
+    const cutoff = Date.now() - 60000;
+    const recent = blockTimes.filter(t => t > cutoff).length;
+    document.getElementById('cnt-rate').textContent = `${recent}/m`;
+  }
+
+  /* ── INCIDENT FEED ───────────────────────────────────────────────────── */
+  function appendIncident(ev, kind) {
+    const feed = document.getElementById('incident-feed');
+
+    // Remove placeholder
+    const placeholder = feed.querySelector('.empty-state');
+    if (placeholder) placeholder.remove();
+
+    const time = new Date(ev.ts).toLocaleTimeString('en', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    const el = document.createElement('div');
+    el.className = 'incident';
+
+    if (kind === 'blocked') {
+      el.innerHTML = `
+        <div class="inc-header">
+          <span class="inc-badge inc-429">429 BLOCKED</span>
+          <span class="inc-time">${time}</span>
+        </div>
+        <div class="inc-rule">▸ ${ev.ruleName}</div>
+        <div class="inc-detail">
+          IP: <span class="inc-ip">${ev.ip}</span> &nbsp;·&nbsp;
+          ${ev.method} ${ev.url} &nbsp;·&nbsp;
+          Retry in <b style="color:var(--yellow)">${ev.retryAfter}s</b>
+        </div>`;
+    } else {
+      el.innerHTML = `
+        <div class="inc-header">
+          <span class="inc-badge inc-tick">ALLOWED</span>
+          <span class="inc-time">${time}</span>
+        </div>
+        <div class="inc-rule">▸ ${ev.ruleName}</div>
+        <div class="inc-detail">
+          IP: <span class="inc-ip">${ev.ip}</span> &nbsp;·&nbsp;
+          Remaining: <b style="color:var(--green)">${ev.remaining}</b>/${ev.limit}
+        </div>`;
+    }
+
+    feed.prepend(el);
+
+    // Cap feed length
+    const rows = feed.querySelectorAll('.incident');
+    if (rows.length > 120) rows[rows.length - 1].remove();
+  }
+
+  function clearFeed() {
+    document.getElementById('incident-feed').innerHTML =
+      `<div class="empty-state"><div class="icon">🛡️</div><div>Feed cleared.</div></div>`;
+    cntBlocked = 0; cntAllowed = 0;
+    seenIps.clear(); blockTimes.length = 0;
+    updateCounters();
+  }
+
+  /* ── RULES PANEL ─────────────────────────────────────────────────────── */
+  let lastStats = null;
+
+  async function loadRules() {
+    try {
+      const r = await fetch('/rl-stats');
+      lastStats = await r.json();
+      document.getElementById('s-rules').textContent = lastStats.rules.length;
+      renderRuleCards(lastStats);
+    } catch(e) { console.error(e); }
+  }
+
+  function refreshRuleCards() {
+    // Fetch quietly in background every 3s
+    fetch('/rl-stats').then(r => r.json()).then(data => {
+      lastStats = data;
+      renderRuleCards(data);
+    }).catch(() => {});
+  }
+
+  function renderRuleCards(data) {
+    const container = document.getElementById('rules-container');
+    container.innerHTML = data.rules.map(rule => {
+      const isStrict = rule.limit <= 10;
+      const topIps   = rule.activeIps.slice(0, 5);
+
+      // Aggregate usage for the rule
+      const totalCount = rule.activeIps.reduce((s, x) => s + x.count, 0);
+      const maxUsed    = rule.activeIps.length > 0 ? rule.activeIps[0].count : 0;
+      const pct        = Math.min(100, Math.round((maxUsed / rule.limit) * 100));
+      const fillClass  = pct >= 100 ? 'danger' : pct >= 70 ? 'warn' : '';
+
+      return `
+        <div class="rule-card ${isStrict ? 'danger' : ''}">
+          <div class="rule-name">${rule.method} ${rule.name}</div>
+          <div class="rule-desc">${rule.description}</div>
+          <div class="rule-meta">
+            <span class="meta-chip chip-method">${rule.method}</span>
+            <span class="meta-chip chip-limit">⬆ ${rule.limit} req</span>
+            <span class="meta-chip chip-window">⏱ ${rule.windowMs / 1000}s window</span>
+            <span class="meta-chip chip-algo">SWL</span>
+          </div>
+
+          <div class="usage-section">
+            <div class="usage-label">
+              <span>Top IP usage (${rule.activeIps.length} active IPs)</span>
+              <span>${maxUsed}/${rule.limit}</span>
+            </div>
+            <div class="usage-bar-track">
+              <div class="usage-bar-fill ${fillClass}" style="width:${pct}%"></div>
+            </div>
+          </div>
+
+          ${topIps.length > 0 ? `
+          <div class="top-ips">
+            ${topIps.map(ip => {
+              const ipPct = Math.min(100, Math.round((ip.count / rule.limit) * 100));
+              return `
+                <div class="ip-row">
+                  <span class="ip-addr" title="${ip.ip}">${ip.ip}</span>
+                  <div class="ip-bar-track">
+                    <div class="ip-bar-fill ${ip.blocked ? 'blocked' : ''}" style="width:${ipPct}%"></div>
+                  </div>
+                  <span class="ip-count ${ip.blocked ? 'ip-blocked' : ''}">${ip.count}</span>
+                </div>`;
+            }).join('')}
+          </div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  loadRules();
+  setInterval(refreshRuleCards, 5000);
+
+  /* ── LEFT TABS ──────────────────────────────────────────────────────── */
+  function switchLeftTab(t) {
+    document.querySelectorAll('.tab-bar .tab').forEach(el => {
+      el.classList.toggle('active', el.textContent.toLowerCase() === t);
+    });
+    document.getElementById('tab-rules').style.display = t === 'rules' ? '' : 'none';
+    document.getElementById('tab-algo').style.display  = t === 'algo'  ? '' : 'none';
+  }
+
+  /* ── BURST SIMULATOR ─────────────────────────────────────────────────── */
+  async function runSimulator() {
+    const endpointVal = document.getElementById('sim-endpoint').value;
+    const count       = parseInt(document.getElementById('sim-count').value)  || 7;
+    const delay       = parseInt(document.getElementById('sim-delay').value)   || 80;
+
+    const [method, ...pathParts] = endpointVal.split(' ');
+    const urlPath = pathParts.join(' ');
+
+    const btn = document.getElementById('sim-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Firing…';
+
+    const resultEl   = document.getElementById('sim-result');
+    const progressEl = document.getElementById('sim-progress');
+    const barEl      = document.getElementById('sim-prog-bar');
+    const lblEl      = document.getElementById('sim-prog-label');
+
+    resultEl.className = 'sim-result';
+    resultEl.style.display = 'none';
+    progressEl.style.display = '';
+    barEl.style.width = '0%';
+
+    let ok = 0, blocked = 0, errors = 0;
+
+    for (let i = 0; i < count; i++) {
+      try {
+        const opts = { method, headers: {} };
+        if (method !== 'GET' && method !== 'HEAD') {
+          opts.headers['Content-Type'] = 'application/json';
+          opts.body = JSON.stringify({ sim: true, attempt: i + 1 });
+        }
+
+        const r = await fetch(urlPath, opts);
+        if (r.status === 429)      blocked++;
+        else if (r.ok)             ok++;
+        else                       errors++;
+      } catch(e) {
+        errors++;
+      }
+
+      const pct = Math.round(((i + 1) / count) * 100);
+      barEl.style.width = pct + '%';
+      lblEl.textContent  = `${i + 1} / ${count} sent — ✅ ${ok}  🚫 ${blocked}  ⚠️ ${errors}`;
+
+      if (delay > 0 && i < count - 1) await sleep(delay);
+    }
+
+    progressEl.style.display = 'none';
+
+    resultEl.style.display = 'block';
+    if (blocked > 0) {
+      resultEl.className = 'sim-result sim-429';
+      resultEl.innerHTML = `🚫 ${blocked} request${blocked > 1 ? 's' : ''} BLOCKED (429)\n✅ ${ok} allowed\n⚠️ ${errors} errors\n\nProxy enforced the limit correctly.`;
+    } else if (errors > 0) {
+      resultEl.className = 'sim-result sim-err';
+      resultEl.innerHTML = `⚠️ ${errors} network error${errors > 1 ? 's' : ''} (is the server running?)\n✅ ${ok} allowed`;
+    } else {
+      resultEl.className = 'sim-result sim-200';
+      resultEl.innerHTML = `✅ All ${ok} requests allowed — under limit.`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = '▶ Fire Burst';
+  }
+
+  function resetSimulator() {
+    document.getElementById('sim-result').style.display  = 'none';
+    document.getElementById('sim-progress').style.display = 'none';
+    document.getElementById('sim-count').value = '7';
+    document.getElementById('sim-delay').value = '80';
+  }
+
+  async function doFlush() {
+    const key = document.getElementById('flush-key').value.trim() || null;
+    try {
+      const r = await fetch('/rl-flush', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      const data = await r.json();
+      document.getElementById('flush-result').textContent =
+        `✓ Flushed: ${data.flushed}`;
+      refreshRuleCards();
+    } catch(e) {
+      document.getElementById('flush-result').textContent = `Error: ${e.message}`;
+    }
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
