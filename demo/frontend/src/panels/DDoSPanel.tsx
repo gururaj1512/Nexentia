@@ -33,7 +33,8 @@ export default function DDoSPanel() {
     for (let i = 0; i < batches; i++) {
       if (stopRef.current) break;
 
-      const batchPromises = Array.from({ length: 50 }, async () => {
+      // 50 batches of 10 requests = 500 total requests
+      const batchPromises = Array.from({ length: 10 }, async () => {
         try {
           const { status, latency } = await apiFetch('/api/vulnerable/data', {}, protectionMode);
           const isBlocked = status === 429;

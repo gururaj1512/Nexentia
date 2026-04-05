@@ -4,7 +4,7 @@ import { useProtection } from '../context/ProtectionContext';
 import { apiFetch } from '../lib/api';
 
 const PASSWORDS = [
-  'password', '123456', 'admin', 'letmein', 'qwerty',
+  'password', '12345678', 'admin', 'letmein', 'qwerty',
   'abc123', 'monkey', 'master', 'dragon', 'pass123',
   'welcome', 'login', 'admin2024', 'password1', 'admin123',
   'root', 'toor', 'test', 'guest', 'user',
@@ -21,7 +21,7 @@ export default function BruteForcePanel() {
   const [attacking, setAttacking] = useState(false);
   const [attempts, setAttempts] = useState<AttemptLog[]>([]);
   const [result, setResult] = useState<'cracked' | 'blocked' | null>(null);
-  const [_crackedPassword, setCrackedPassword] = useState('');
+  const [crackedInfo, setCrackedInfo] = useState<{ password: string; dbQuery?: string; role?: string; email?: string }>({ password: '' });
   const stopRef = useRef(false);
 
   const launchAttack = async () => {
@@ -46,12 +46,12 @@ export default function BruteForcePanel() {
         '/api/vulnerable/brute',
         {
           method: 'POST',
-          body: JSON.stringify({ username: 'admin', password, attemptNumber: attemptNum }),
+          body: JSON.stringify({ username: 'yessha', password, attemptNumber: attemptNum }),
         },
         protectionMode
       );
 
-      const res = data as { success?: boolean; blocked?: boolean; crackedPassword?: string };
+      const res = data as { success?: boolean; blocked?: boolean; crackedPassword?: string; role?: string; email?: string; dbQuery?: string };
       let attemptStatus: AttemptLog['status'] = 'failed';
 
       if (status === 429 || res.blocked) {
@@ -72,7 +72,7 @@ export default function BruteForcePanel() {
         return;
       } else if (res.success) {
         attemptStatus = 'success';
-        setCrackedPassword(res.crackedPassword || password);
+        setCrackedInfo({ password: res.crackedPassword || password, dbQuery: res.dbQuery, role: res.role, email: res.email });
         addLogEntry({
           timestamp: new Date().toLocaleTimeString(),
           method: 'POST',
@@ -113,7 +113,7 @@ export default function BruteForcePanel() {
     setAttacking(false);
     setAttempts([]);
     setResult(null);
-    setCrackedPassword('');
+    setCrackedInfo({ password: '' });
   };
 
   const glowClass = protectionMode
@@ -175,18 +175,31 @@ export default function BruteForcePanel() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: [1, 1.05, 1] }}
             exit={{ opacity: 0 }}
-            className="bg-red-900/80 border border-red-500 rounded-lg p-4 text-center"
+            className="bg-red-900/80 border border-red-500 rounded-lg p-4 flex flex-col gap-3"
           >
-            <div className="text-xl font-bold text-red-400">🔓 PASSWORD CRACKED</div>
+            <div className="text-xl font-bold text-red-400 text-center">🔓 PASSWORD CRACKED via NeonDB</div>
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
-              className="text-2xl font-mono font-bold text-yellow-300 mt-2"
+              className="text-2xl font-mono font-bold text-yellow-300 text-center"
             >
-              admin123
+              {crackedInfo.password}
             </motion.div>
-            <div className="text-sm text-red-300 mt-1">Found after {attempts.length} attempts</div>
+            <div className="text-sm text-red-300 text-center">Found after {attempts.length} attempts</div>
+            {crackedInfo.dbQuery && (
+              <div className="bg-black/50 rounded p-3 font-mono text-xs">
+                <div className="text-yellow-400 mb-1">Executed DB Query:</div>
+                <div className="text-orange-300 break-all">{crackedInfo.dbQuery}</div>
+              </div>
+            )}
+            {(crackedInfo.role || crackedInfo.email) && (
+              <div className="bg-black/50 rounded p-3 font-mono text-xs">
+                <div className="text-yellow-400 mb-1">Compromised Account:</div>
+                {crackedInfo.role && <div className="text-red-300">Role: <span className="text-white">{crackedInfo.role}</span></div>}
+                {crackedInfo.email && <div className="text-red-300">Email: <span className="text-white">{crackedInfo.email}</span></div>}
+              </div>
+            )}
           </motion.div>
         )}
         {result === 'blocked' && (
