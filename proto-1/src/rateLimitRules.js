@@ -16,13 +16,13 @@
  *   fragments in config without knowing the full proxy prefix.
  */
 
-const config = require('../config.json');
+const { runtimeConfig } = require('./runtimeConfig');
 
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const rules = (config.rate_limits || []).map(r => ({
+const rules = (runtimeConfig.rate_limits || []).map(r => ({
   id:          r.id || r.path.replace(/\W+/g, '-').replace(/^-|-$/g, ''),
   name:        `${r.method} ${r.path}`,
   method:      r.method.toUpperCase(),

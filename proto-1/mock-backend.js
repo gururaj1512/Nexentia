@@ -2,10 +2,15 @@
 // All traffic must come through the proxy on port 3000.
 // Run: node mock-backend.js [port]   (default: 4001)
 
+require('dotenv').config();
+
 const http = require('http');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.argv[2] ? parseInt(process.argv[2], 10) : 4001;
+const PORT = parseInt(process.env.PORT || process.argv[2] || '4001', 10);
+const HOST = process.env.HOST || '0.0.0.0';
+const PROXY_BASE_URL = process.env.PROXY_BASE_URL || 'http://localhost:3000';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 
 const sseClients = new Set();
 
@@ -117,12 +122,13 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n[MockBackend] Running on port ${PORT}`);
-  console.log(`  Direct URL (bypassed):  http://localhost:${PORT}`);
-  console.log(`  Correct URL (via proxy): http://localhost:3000/api/v1`);
-  console.log(`  Internal SSE stream    : http://localhost:${PORT}/internal/events\n`);
-  publishBackendEvent('BACKEND_ONLINE', { url: `http://localhost:${PORT}` });
+  console.log(`  Host binding           : ${HOST}`);
+  console.log(`  Direct URL (bypassed):  ${PUBLIC_BASE_URL}`);
+  console.log(`  Correct URL (via proxy): ${PROXY_BASE_URL}/api/v1`);
+  console.log(`  Internal SSE stream    : ${PUBLIC_BASE_URL}/internal/events\n`);
+  publishBackendEvent('BACKEND_ONLINE', { url: PUBLIC_BASE_URL });
 });
 
 // ── Attach WebSocket Echo Server ──────────────────────────────────────────

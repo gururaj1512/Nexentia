@@ -2,6 +2,12 @@
 
 A config-driven reverse proxy built from scratch with JWT authentication, NeonDB (PostgreSQL) session storage, and a real-time browser UI that shows every internal hop as it happens.
 
+Deployment quick links:
+
+- See DEPLOYMENT.md for production deployment setup of index.js and mock-backend.js.
+- Copy .env.example to .env and fill real secrets for local/prod parity.
+- Localhost targets in config.json are development defaults; production targets must come from env vars.
+
 ---
 
 ## What Is This?

@@ -4,10 +4,16 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:proxy": "node index.js",
+    "start:mock": "node mock-backend.js",
     "dev": "node --watch index.js",
+    "dev:mock": "node --watch mock-backend.js",
     "mock": "node mock-backend.js",
     "mock:4002": "node mock-backend.js 4002",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [],
   "author": "",

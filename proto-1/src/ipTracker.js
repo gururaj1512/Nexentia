@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events');
-const config = require('../config.json');
+const { runtimeConfig } = require('./runtimeConfig');
 
 const MAX_TRACKED_IPS = 2000;
 const MAX_RECENT_PER_IP = 20;
@@ -165,7 +165,7 @@ function getTrackedIpsSnapshot(limit = 100) {
 }
 
 function hydrateBlacklistFromConfig() {
-  const initial = config.security?.blacklisted_ips || [];
+  const initial = runtimeConfig.security?.blacklisted_ips || [];
   for (const ip of initial) {
     try {
       addToBlacklist(ip, 'Configured in config.json', 'startup');

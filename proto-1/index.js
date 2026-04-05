@@ -1,7 +1,8 @@
+require('dotenv').config();
+
 const express   = require('express');
 const path      = require('path');
-const config    = require('./config.json');
-require('dotenv').config();
+const { runtimeConfig, collectRuntimeWarnings, collectRuntimeErrors } = require('./src/runtimeConfig');
 
 const { init: initDb }                    = require('./src/db');
 const { buildRouter }                     = require('./src/router');
@@ -27,7 +28,13 @@ const {
 } = require('./src/ipTracker');
 
 const app = express();
-app.use(express.json());
+app.disable('x-powered-by');
+
+if (runtimeConfig.http?.trustProxy !== false) {
+  app.set('trust proxy', runtimeConfig.http.trustProxy);
+}
+
+app.use(express.json({ limit: runtimeConfig.http?.jsonBodyLimit || '1mb' }));
 
 // ── Sender-IP tracking (applies to all requests) ───────────────────────────
 app.use((req, res, next) => {
@@ -41,7 +48,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── WAF (runs FIRST — before rate limiting and routing) ────────────────────
-const wafMiddleware = buildWafMiddleware(config.security || {});
+const wafMiddleware = buildWafMiddleware(runtimeConfig.security || {});
 app.use(wafMiddleware);
 
 // ── Rate Limiter (runs AFTER WAF, BEFORE auth/proxy) ──────────────────────
@@ -225,8 +232,8 @@ app.get('/backend-events', (req, res) => {
 // Proxy config
 app.get('/config-info', (req, res) => {
   res.json({
-    proxyPort: config.proxy.port,
-    routes: config.proxy.routes.map(r => ({
+    proxyPort: runtimeConfig.proxy.port,
+    routes: runtimeConfig.proxy.routes.map(r => ({
       path: r.path, target: r.target, auth: r.auth, stripPrefix: r.stripPrefix,
     })),
   });
@@ -234,7 +241,7 @@ app.get('/config-info', (req, res) => {
 
 // WAF config snapshot (public — no secrets)
 app.get('/waf-config', (req, res) => {
-  const sec = config.security || {};
+  const sec = runtimeConfig.security || {};
   const runtimeBlacklist = getBlacklistSnapshot();
 
   res.json({
@@ -342,7 +349,7 @@ app.get('/health', (req, res) => res.json({
 }));
 
 // ── Proxy router ───────────────────────────────────────────────────────────
-app.use(buildRouter(config.proxy.routes));
+app.use(buildRouter(runtimeConfig.proxy.routes));
 
 // ── 404 fallback ───────────────────────────────────────────────────────────
 app.use((req, res) => {
@@ -352,8 +359,23 @@ app.use((req, res) => {
 // ── Boot ───────────────────────────────────────────────────────────────────
 async function start() {
   try {
-    await initDb();
-    const port = config.proxy.port;
+    const runtimeErrors = collectRuntimeErrors(runtimeConfig);
+    if (runtimeErrors.length > 0) {
+      runtimeErrors.forEach(error => console.error(`[Config Error] ${error}`));
+      throw new Error('Runtime configuration validation failed.');
+    }
+
+    const runtimeWarnings = collectRuntimeWarnings(runtimeConfig);
+    runtimeWarnings.forEach(warning => console.warn(`[Config] ${warning}`));
+
+    const skipDbInit = runtimeConfig.env?.skipDbInit === true;
+    if (skipDbInit) {
+      console.warn('[DB] SKIP_DB_INIT=true. Proxy started without DB schema initialization.');
+    } else {
+      await initDb();
+    }
+
+    const port = runtimeConfig.proxy.port;
     const server = app.listen(port, () => {
       console.log(`\n${'─'.repeat(56)}`);
       console.log(` Nexentia Proxy Engine`);
@@ -366,7 +388,7 @@ async function start() {
       console.log(`${'─'.repeat(56)}`);
 
       console.log('\n[Proxy Routes]');
-      config.proxy.routes.forEach(r =>
+      runtimeConfig.proxy.routes.forEach(r =>
         console.log(`  ${r.path.padEnd(12)} → ${r.target}  auth:${r.auth}  strip:${r.stripPrefix}`),
       );
 
@@ -375,7 +397,7 @@ async function start() {
         console.log(`  ${r.method.padEnd(6)} ${r.name.padEnd(30)} ${r.limit}/${r.windowMs/1000}s`),
       );
 
-      const sec = config.security || {};
+      const sec = runtimeConfig.security || {};
       console.log('\n[WAF]');
       console.log(`  SQL Injection   : ${sec.block_sql_injection ? '✓ BLOCK' : '✗ off'}`);
       console.log(`  XSS             : ${sec.block_xss ? '✓ BLOCK' : '✗ off'}`);
@@ -383,7 +405,7 @@ async function start() {
       console.log(`  Scan body       : ${sec.scan_body !== false ? 'yes' : 'no'}`);
       console.log(`  Scan query      : ${sec.scan_query !== false ? 'yes' : 'no'}`);
 
-      const mainBackendTarget = config.server?.backend_url || config.proxy.routes[0]?.target;
+      const mainBackendTarget = runtimeConfig.server?.backend_url || runtimeConfig.proxy.routes[0]?.target;
       if (mainBackendTarget) {
         const base = mainBackendTarget.replace(/\/+$/, '');
         console.log('\n[SSE Bridge]');
@@ -398,7 +420,7 @@ async function start() {
     // ── Bind WebSocket Upgrades ──────────────────────────────────────────────
     server.on('upgrade', (req, socket, head) => {
       // Proxy websocket connections using the main config targets
-      handleUpgrade(req, socket, head, config);
+      handleUpgrade(req, socket, head, runtimeConfig);
     });
 
     server.on('close', () => {
