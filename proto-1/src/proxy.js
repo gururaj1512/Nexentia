@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const { proxyEvents } = require('./proxyLogger');
 
@@ -27,7 +28,32 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
       urlPath = req.url.replace(new RegExp(`^${routePath}`), '') || '/';
     }
 
-    const targetUrl = new URL(target);
+    let targetUrl;
+    try {
+      targetUrl = new URL(target);
+    } catch (err) {
+      emit('PROXY_ERROR', { reqId, error: `Invalid target URL: ${target}` });
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Gateway', detail: `Invalid target URL: ${target}` }));
+      }
+      reject(err);
+      return;
+    }
+
+    const isSecureTarget = targetUrl.protocol === 'https:';
+    if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
+      emit('PROXY_ERROR', { reqId, error: `Unsupported target protocol: ${targetUrl.protocol}` });
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Gateway', detail: `Unsupported target protocol: ${targetUrl.protocol}` }));
+      }
+      reject(new Error(`Unsupported target protocol: ${targetUrl.protocol}`));
+      return;
+    }
+
+    const requestModule = isSecureTarget ? https : http;
+    const targetPort = parseInt(targetUrl.port, 10) || (isSecureTarget ? 443 : 80);
 
     // Copy only end-to-end headers — drop every hop-by-hop header
     const outHeaders = {};
@@ -50,7 +76,7 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
 
     const options = {
       hostname: targetUrl.hostname,
-      port:     parseInt(targetUrl.port) || 80,
+      port:     targetPort,
       path:     urlPath,
       method:   req.method,
       headers:  outHeaders,
@@ -75,10 +101,10 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
       reqId,
       method:        req.method,
       forwardedPath: urlPath,
-      target:        `${targetUrl.hostname}:${targetUrl.port || 80}`,
+      target:        `${targetUrl.hostname}:${targetPort}`,
     });
 
-    const proxyReq = http.request(options, (proxyRes) => {
+    const proxyReq = requestModule.request(options, (proxyRes) => {
       const chunks = [];
       proxyRes.on('data', chunk => chunks.push(chunk));
 
