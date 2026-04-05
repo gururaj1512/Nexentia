@@ -18,19 +18,10 @@
  * Clean requests: emit 'waf:allowed' and call next().
  */
 
-const { URL }               = require('url');
-const { wafEvents }         = require('../wafEvents');
+const { URL } = require('url');
+const { wafEvents } = require('../wafEvents');
 const { flattenValues, scanPairs } = require('../waf');
-
-/**
- * Extract the real client IP.
- * Trusts X-Forwarded-For only for the first hop (proxy set it).
- */
-function clientIp(req) {
-  const fwd = req.headers['x-forwarded-for'];
-  if (fwd) return fwd.split(',')[0].trim();
-  return req.socket.remoteAddress || '127.0.0.1';
-}
+const { getClientIp, isBlacklisted, markBlockedRequest } = require('../ipTracker');
 
 /**
  * Parse query-string values from req.url into { field, value } pairs.
@@ -54,17 +45,12 @@ function queryPairs(rawUrl) {
  * @param {{ block_sql_injection, block_xss, scan_body, scan_query, blacklisted_ips }} secCfg
  */
 function buildWafMiddleware(secCfg) {
-  // Normalise blacklist to a Set of lowercased strings for O(1) lookup
-  const blacklist = new Set(
-    (secCfg.blacklisted_ips || []).map(ip => ip.trim().toLowerCase()),
-  );
-
   return function wafMiddleware(req, res, next) {
-    const ip      = clientIp(req);
-    const ipLower = ip.toLowerCase();
+    const ip = req.clientIp || getClientIp(req);
 
     // ── Stage 1: IP Blacklist ──────────────────────────────────────────────
-    if (blacklist.has(ipLower)) {
+    if (isBlacklisted(ip)) {
+      markBlockedRequest(ip, 'IP_BLACKLIST');
       const evt = {
         ts:      Date.now(),
         type:    'IP_BLACKLIST',
@@ -89,6 +75,7 @@ function buildWafMiddleware(secCfg) {
       const qPairs = queryPairs(req.url);
       const hit    = scanPairs(qPairs, secCfg);
       if (hit) {
+        markBlockedRequest(ip, hit.type);
         const evt = { ts: Date.now(), ip, method: req.method, url: req.url, ...hit };
         wafEvents.emit('waf:blocked', evt);
         console.warn(`[WAF] 400 ${hit.type}  ${ip}  field=${hit.field}  rule="${hit.rule}"`);
@@ -110,6 +97,7 @@ function buildWafMiddleware(secCfg) {
       }));
       const hit = scanPairs(bPairs, secCfg);
       if (hit) {
+        markBlockedRequest(ip, hit.type);
         const evt = { ts: Date.now(), ip, method: req.method, url: req.url, ...hit };
         wafEvents.emit('waf:blocked', evt);
         console.warn(`[WAF] 400 ${hit.type}  ${ip}  field=${hit.field}  rule="${hit.rule}"`);

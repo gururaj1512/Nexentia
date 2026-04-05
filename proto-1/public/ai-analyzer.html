@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Threat Analyzer — Nexentia Proxy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0f14;
+      --surface:  #141720;
+      --surface2: #1c2030;
+      --surface3: #222435;
+      --border:   #252a3a;
+      --red:      #ef4444;
+      --orange:   #f97316;
+      --yellow:   #f59e0b;
+      --green:    #22c55e;
+      --blue:     #4f8ef7;
+      --purple:   #a78bfa;
+      --cyan:     #22d3ee;
+      --pink:     #f472b6;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --font:     'Segoe UI', system-ui, sans-serif;
+      --mono:     'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    /* ── HEADER ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: .03em; }
+    .pill {
+      padding: 3px 10px; border-radius: 20px;
+      font-size: .7rem; font-family: var(--mono);
+    }
+    .pill-ai     { background: #0e1a30; border: 1px solid #1d4ed8; color: #93c5fd; }
+    .pill-live   { background: #0a1a10; border: 1px solid #14532d; color: #86efac; }
+    .pill-off    { background: #1a1400; border: 1px solid #713f12; color: #fde68a; }
+
+    #conn-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); transition: background .3s; margin-left: 8px;
+    }
+    #conn-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    #gemini-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted); transition: background .3s;
+    }
+    #gemini-dot.on { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
+    #conn-label  { font-size: .74rem; color: var(--muted); }
+    #gemini-label { font-size: .74rem; color: var(--muted); }
+
+    .nav-links { margin-left: auto; display: flex; gap: 8px; }
+    .nav-link {
+      padding: 5px 12px; border-radius: 6px; font-size: .76rem;
+      text-decoration: none; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted); transition: all .2s;
+    }
+    .nav-link:hover { color: var(--text); border-color: var(--blue); }
+
+    /* ── LAYOUT ─────────────────────────────────────────────────────── */
+    .workspace {
+      display: grid;
+      grid-template-columns: 300px 1fr 360px;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+    .panel:last-child { border-right: none; }
+
+    .panel-header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      font-size: .75rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted);
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .section-title {
+      font-size: .68rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--cyan); margin-bottom: 10px;
+    }
+    .divider { height: 1px; background: var(--border); margin: 14px 0; }
+
+    /* ── STAT CARDS ─────────────────────────────────────────────────── */
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .stat-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px; text-align: center;
+    }
+    .stat-val {
+      font-size: 1.5rem; font-weight: 800;
+      font-family: var(--mono); line-height: 1;
+    }
+    .stat-lbl { font-size: .6rem; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .07em; }
+    .s-total  .stat-val { color: var(--blue); }
+    .s-high   .stat-val { color: var(--red); }
+    .s-sql    .stat-val { color: var(--orange); }
+    .s-xss    .stat-val { color: var(--pink); }
+
+    /* ── LEFT PANEL CONTENT ─────────────────────────────────────────── */
+    .info-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px; margin-bottom: 10px;
+    }
+    .info-card h3 {
+      font-size: .8rem; font-weight: 700; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .info-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 5px 0; border-bottom: 1px solid var(--border);
+      font-size: .74rem;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { color: var(--muted); }
+    .info-val   { font-family: var(--mono); font-weight: 700; color: var(--text); }
+    .info-val.green  { color: var(--green); }
+    .info-val.cyan   { color: var(--cyan); }
+    .info-val.red    { color: var(--red); }
+    .info-val.yellow { color: var(--yellow); }
+
+    /* Severity bar */
+    .sev-bar-wrap { margin: 8px 0 4px; }
+    .sev-bar-track {
+      height: 6px; background: var(--surface3); border-radius: 3px; overflow: hidden;
+    }
+    .sev-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .sev-label { font-size: .64rem; color: var(--muted); margin-top: 3px; text-align: right; }
+
+    /* ── THREAT FEED ────────────────────────────────────────────────── */
+    .threat-feed { flex: 1; overflow-y: auto; }
+    .threat-feed::-webkit-scrollbar { width: 4px; }
+    .threat-feed::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .threat-card {
+      margin: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+      animation: slideIn .25s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .threat-top {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .badge {
+      padding: 2px 8px; border-radius: 4px;
+      font-size: .64rem; font-weight: 800; letter-spacing: .04em;
+    }
+    .badge-sql  { background: #2a1400; color: var(--orange); border: 1px solid #7c2d12; }
+    .badge-xss  { background: #2a0820; color: var(--pink);   border: 1px solid #831843; }
+    .badge-ip   { background: #1a1040; color: var(--purple); border: 1px solid #3b1d8a; }
+    .badge-rl   { background: #1a0a00; color: var(--yellow); border: 1px solid #713f12; }
+
+    .sev-badge {
+      padding: 2px 8px; border-radius: 4px;
+      font-size: .64rem; font-weight: 800; font-family: var(--mono);
+    }
+    .sev-1,.sev-2,.sev-3 { background:#0a1a10; color:var(--green);  border:1px solid #14532d; }
+    .sev-4,.sev-5,.sev-6 { background:#1a1400; color:var(--yellow); border:1px solid #713f12; }
+    .sev-7,.sev-8        { background:#2a1400; color:var(--orange); border:1px solid #7c2d12; }
+    .sev-9,.sev-10       { background:#2a0a0a; color:var(--red);    border:1px solid #7f1d1d; }
+
+    .threat-time { font-size: .64rem; color: var(--muted); font-family: var(--mono); margin-left: auto; }
+
+    .threat-meta {
+      padding: 8px 14px;
+      font-size: .7rem; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .threat-meta span { color: var(--text); }
+    .threat-meta .ip  { color: var(--purple); }
+    .threat-meta .url { color: #60a5fa; }
+
+    .threat-ai {
+      padding: 10px 14px;
+    }
+    .ai-analyzing {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .72rem; color: var(--muted);
+    }
+    .ai-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--cyan);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .ai-result { display: none; }
+    .ai-result.show { display: block; }
+
+    .ai-attack-name {
+      font-size: .82rem; font-weight: 700; color: var(--cyan);
+      margin-bottom: 8px;
+    }
+    .ai-field {
+      margin-bottom: 6px; font-size: .72rem; line-height: 1.5;
+    }
+    .ai-field-label {
+      font-size: .62rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 2px;
+    }
+    .ai-intent       { color: #fde68a; }
+    .ai-technique    { color: #bfdbfe; }
+    .ai-recommend    { color: #bbf7d0; }
+
+    .no-gemini-note {
+      font-size: .68rem; color: var(--muted); font-style: italic;
+    }
+
+    .empty-state {
+      padding: 60px 20px; text-align: center;
+      color: var(--muted); font-size: .78rem;
+    }
+    .empty-state .es-icon { font-size: 2.4rem; margin-bottom: 10px; }
+
+    /* ── RIGHT PANEL — SESSION REPORT ───────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 9px 16px; border-radius: 8px;
+      font-size: .8rem; font-weight: 700; cursor: pointer;
+      border: none; width: 100%; margin-top: 8px;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active  { transform: scale(.97); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-ai      { background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: #fff; }
+    .btn-clear   { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+    .report-box {
+      margin-top: 14px; display: none;
+    }
+    .report-box.show { display: block; }
+
+    .report-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .report-title { font-size: .88rem; font-weight: 700; color: var(--cyan); }
+
+    .threat-level-badge {
+      padding: 3px 10px; border-radius: 20px;
+      font-size: .7rem; font-weight: 800; font-family: var(--mono);
+    }
+    .tl-LOW      { background: #0a1a10; color: var(--green);  border: 1px solid #14532d; }
+    .tl-MEDIUM   { background: #1a1400; color: var(--yellow); border: 1px solid #713f12; }
+    .tl-HIGH     { background: #2a1400; color: var(--orange); border: 1px solid #7c2d12; }
+    .tl-CRITICAL { background: #2a0a0a; color: var(--red);    border: 1px solid #7f1d1d; }
+
+    .report-summary {
+      font-size: .76rem; line-height: 1.7; color: var(--text);
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px; margin-bottom: 12px;
+    }
+
+    .report-section { margin-bottom: 12px; }
+    .report-section-title {
+      font-size: .65rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+    }
+    .report-item {
+      font-size: .73rem; padding: 5px 8px; border-radius: 5px;
+      background: var(--surface2); border: 1px solid var(--border);
+      margin-bottom: 4px; line-height: 1.4;
+    }
+    .report-item.insight    { border-left: 3px solid var(--cyan); }
+    .report-item.recommend  { border-left: 3px solid var(--green); }
+    .report-item.ip         { border-left: 3px solid var(--purple); font-family: var(--mono); color: var(--purple); }
+
+    .report-generating {
+      display: flex; align-items: center; gap: 10px;
+      padding: 20px; font-size: .78rem; color: var(--muted);
+    }
+    .report-generating .ai-spinner { width: 18px; height: 18px; border-width: 3px; }
+
+    .status-strip {
+      flex-shrink: 0; padding: 8px 16px;
+      border-top: 1px solid var(--border);
+      font-size: .68rem; color: var(--muted);
+      display: flex; gap: 16px; background: var(--surface);
+    }
+    .status-strip b { color: var(--text); }
+
+    .clear-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: .7rem; margin-left: auto; font-family: var(--font);
+    }
+    .clear-btn:hover { color: var(--text); }
+
+    @media (max-width: 1200px) {
+      .workspace { grid-template-columns: 260px 1fr 320px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 AI Threat Analyzer</h1>
+  <span class="pill pill-ai">Gemini 2.0 Flash</span>
+  <div id="gemini-dot"></div>
+  <span id="gemini-label">Checking…</span>
+  <div id="conn-dot" style="margin-left:16px;"></div>
+  <span id="conn-label">Connecting…</span>
+  <nav class="nav-links">
+    <a class="nav-link" href="/waf.html">🛡️ WAF</a>
+    <a class="nav-link" href="/rate-limits.html">⚡ Rate Limiter</a>
+    <a class="nav-link" href="/">← Proxy Engine</a>
+  </nav>
+</header>
+
+<div class="workspace">
+
+  <!-- ── LEFT: Session Stats ── -->
+  <div class="panel">
+    <div class="panel-header">📊 Session Overview</div>
+
+    <div class="stats-grid">
+      <div class="stat-card s-total">
+        <div class="stat-val" id="cnt-total">0</div>
+        <div class="stat-lbl">Total Threats</div>
+      </div>
+      <div class="stat-card s-high">
+        <div class="stat-val" id="cnt-high">0</div>
+        <div class="stat-lbl">High Severity</div>
+      </div>
+      <div class="stat-card s-sql">
+        <div class="stat-val" id="cnt-sql">0</div>
+        <div class="stat-lbl">SQL Injection</div>
+      </div>
+      <div class="stat-card s-xss">
+        <div class="stat-val" id="cnt-xss">0</div>
+        <div class="stat-lbl">XSS Attacks</div>
+      </div>
+    </div>
+
+    <div class="panel-body">
+      <div class="section-title">Avg Severity</div>
+      <div class="sev-bar-wrap">
+        <div class="sev-bar-track">
+          <div class="sev-bar-fill" id="avg-sev-bar" style="width:0%;background:var(--green);"></div>
+        </div>
+        <div class="sev-label"><span id="avg-sev-val">—</span> / 10</div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Breakdown</div>
+      <div id="breakdown-list">
+        <div style="color:var(--muted);font-size:.74rem;">No threats yet.</div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Top Attacker IPs</div>
+      <div id="ip-list">
+        <div style="color:var(--muted);font-size:.74rem;">None recorded.</div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="info-card" style="border-left:3px solid var(--cyan);">
+        <h3>⚙️ How It Works</h3>
+        <div style="font-size:.71rem;color:var(--muted);line-height:1.8;">
+          Every blocked request is sent to <span style="color:var(--cyan);">Gemini 2.0 Flash</span> for real-time analysis.<br><br>
+          Gemini identifies the attack intent, technique, severity, and recommends a defensive action.<br><br>
+          Use <span style="color:var(--green);">"Generate Report"</span> for an AI-written executive summary of the session.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MIDDLE: Live AI Analysis Feed ── -->
+  <div class="panel">
+    <div class="panel-header">
+      🔴 Live AI Analysis Feed
+      <span style="font-size:.64rem;font-weight:400;color:var(--muted);">(real-time)</span>
+      <button class="clear-btn" onclick="clearFeed()">clear</button>
+    </div>
+
+    <div class="threat-feed" id="threat-feed">
+      <div class="empty-state">
+        <div class="es-icon">🤖</div>
+        <div>Waiting for threats…</div>
+        <div style="margin-top:6px;font-size:.72rem;">
+          Fire payloads from the <a href="/waf.html" style="color:var(--cyan);">WAF dashboard</a> to see AI analysis here.
+        </div>
+      </div>
+    </div>
+
+    <div class="status-strip">
+      <span>Analyzed: <b id="s-analyzed" style="color:var(--cyan)">0</b></span>
+      <span>High risk: <b id="s-high" style="color:var(--red)">0</b></span>
+      <span>Avg severity: <b id="s-avg">—</b></span>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Session Report ── -->
+  <div class="panel">
+    <div class="panel-header">📋 Session Report</div>
+    <div class="panel-body">
+
+      <div class="section-title">AI-Generated Summary</div>
+      <div style="font-size:.73rem;color:var(--muted);margin-bottom:10px;line-height:1.6;">
+        Click below to have Gemini analyze all threats from this session and generate an executive security report.
+      </div>
+
+      <button class="btn btn-ai" id="gen-btn" onclick="generateReport()">
+        ✨ Generate Session Report
+      </button>
+      <button class="btn btn-clear" onclick="clearReport()">✕ Clear Report</button>
+
+      <div id="report-generating" style="display:none;" class="report-generating">
+        <div class="ai-spinner"></div>
+        Gemini is analyzing your session…
+      </div>
+
+      <div id="report-box" class="report-box">
+        <!-- injected by JS -->
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Severity Guide</div>
+      <div style="font-size:.71rem;line-height:2.2;">
+        <span class="sev-badge sev-1">1–3</span> <span style="color:var(--muted);margin-left:6px;">Low — reconnaissance, minor probes</span><br>
+        <span class="sev-badge sev-5">4–6</span> <span style="color:var(--muted);margin-left:6px;">Medium — targeted but limited impact</span><br>
+        <span class="sev-badge sev-8">7–8</span> <span style="color:var(--muted);margin-left:6px;">High — active exploitation attempt</span><br>
+        <span class="sev-badge sev-10">9–10</span> <span style="color:var(--muted);margin-left:6px;">Critical — full compromise possible</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="section-title">Middleware Position</div>
+      <div style="font-size:.71rem;color:var(--muted);line-height:2;">
+        <span style="color:var(--red);">① WAF</span> — blocks payload<br>
+        <span style="color:var(--cyan);">② AI Analyzer</span> — classifies threat ← <b style="color:var(--text);">you are here</b><br>
+        <span style="color:var(--orange);">③ Rate Limiter</span> — per-IP throttle<br>
+        <span style="color:var(--purple);">④ Auth</span> — JWT check<br>
+        <span style="color:var(--green);">⑤ Proxy Router</span> — forward
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  /* ── State ─────────────────────────────────────────────────────────── */
+  let totalThreats = 0, highSeverity = 0, sevSum = 0, sevCount = 0;
+  let sqlCount = 0, xssCount = 0;
+  const ipCounts    = {};
+  const typeCounts  = {};
+  // id → card DOM element
+  const cardMap     = {};
+  let geminiEnabled = false;
+
+  /* ── Counters ───────────────────────────────────────────────────────── */
+  function updateCounters() {
+    document.getElementById('cnt-total').textContent = totalThreats;
+    document.getElementById('cnt-high').textContent  = highSeverity;
+    document.getElementById('cnt-sql').textContent   = sqlCount;
+    document.getElementById('cnt-xss').textContent   = xssCount;
+    document.getElementById('s-analyzed').textContent = totalThreats;
+    document.getElementById('s-high').textContent     = highSeverity;
+
+    const avg = sevCount > 0 ? (sevSum / sevCount).toFixed(1) : '—';
+    document.getElementById('avg-sev-val').textContent = avg;
+    document.getElementById('s-avg').textContent       = avg;
+
+    if (sevCount > 0) {
+      const pct = ((sevSum / sevCount) / 10 * 100).toFixed(0);
+      const bar = document.getElementById('avg-sev-bar');
+      bar.style.width = pct + '%';
+      const v = sevSum / sevCount;
+      bar.style.background = v >= 7 ? 'var(--red)' : v >= 4 ? 'var(--yellow)' : 'var(--green)';
+    }
+
+    // Breakdown
+    const bdEl = document.getElementById('breakdown-list');
+    const bdEntries = Object.entries(typeCounts).sort((a,b) => b[1]-a[1]);
+    if (bdEntries.length === 0) {
+      bdEl.innerHTML = '<div style="color:var(--muted);font-size:.74rem;">No threats yet.</div>';
+    } else {
+      bdEl.innerHTML = bdEntries.map(([type, cnt]) => {
+        const color = type === 'SQL_INJECTION' ? 'var(--orange)'
+                    : type === 'XSS'           ? 'var(--pink)'
+                    : type === 'IP_BLACKLIST'   ? 'var(--purple)'
+                    : type === 'RATE_LIMIT'     ? 'var(--yellow)'
+                    : 'var(--muted)';
+        return `<div class="info-row">
+          <span class="info-label" style="color:${color};">${type}</span>
+          <span class="info-val" style="color:${color};">${cnt}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // Top IPs
+    const ipEl = document.getElementById('ip-list');
+    const ipEntries = Object.entries(ipCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    if (ipEntries.length === 0) {
+      ipEl.innerHTML = '<div style="color:var(--muted);font-size:.74rem;">None recorded.</div>';
+    } else {
+      ipEl.innerHTML = ipEntries.map(([ip, cnt]) =>
+        `<div class="info-row">
+          <span class="info-label" style="color:var(--purple);font-family:var(--mono);font-size:.7rem;">${escHtml(ip)}</span>
+          <span class="info-val" style="color:var(--purple);">${cnt}x</span>
+        </div>`
+      ).join('');
+    }
+  }
+
+  /* ── SSE ─────────────────────────────────────────────────────────── */
+  function connectSSE() {
+    const es = new EventSource('/ai-events');
+
+    es.onopen = () => {
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-label').textContent = 'Live';
+    };
+    es.onerror = () => {
+      document.getElementById('conn-dot').classList.remove('live');
+      document.getElementById('conn-label').textContent = 'Reconnecting…';
+    };
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      handleEvent(ev);
+    };
+  }
+  connectSSE();
+
+  function handleEvent(ev) {
+    if (ev.event === 'CONNECTED') {
+      geminiEnabled = !!ev.geminiEnabled;
+      const dot   = document.getElementById('gemini-dot');
+      const label = document.getElementById('gemini-label');
+      if (geminiEnabled) {
+        dot.classList.add('on');
+        label.textContent = 'Gemini Active';
+        label.style.color = 'var(--cyan)';
+        document.querySelector('.pill-ai').textContent = 'Gemini 2.0 Flash';
+      } else {
+        label.textContent = 'Gemini Disabled';
+        label.style.color = 'var(--yellow)';
+        document.querySelector('.pill-ai').className = 'pill pill-off';
+        document.querySelector('.pill-ai').textContent = 'No API Key';
+      }
+      return;
+    }
+
+    if (ev.event === 'INCOMING') {
+      totalThreats++;
+      typeCounts[ev.type] = (typeCounts[ev.type] || 0) + 1;
+      if (ev.ip) ipCounts[ev.ip] = (ipCounts[ev.ip] || 0) + 1;
+      if (ev.type === 'SQL_INJECTION') sqlCount++;
+      if (ev.type === 'XSS') xssCount++;
+      addThreatCard(ev);
+      updateCounters();
+      return;
+    }
+
+    if (ev.event === 'ANALYSIS') {
+      updateThreatCard(ev);
+      if (ev.analysis) {
+        const sev = ev.analysis.severity || 0;
+        sevSum += sev; sevCount++;
+        if (sev >= 7) highSeverity++;
+      }
+      updateCounters();
+      return;
+    }
+  }
+
+  /* ── Threat Card ────────────────────────────────────────────────────── */
+  function addThreatCard(ev) {
+    const feed = document.getElementById('threat-feed');
+    const ph   = feed.querySelector('.empty-state');
+    if (ph) ph.remove();
+
+    const time = new Date(ev.ts).toLocaleTimeString('en', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    const badgeCls   = badgeClass(ev.type);
+    const badgeLabel = badgeName(ev.type);
+
+    const card = document.createElement('div');
+    card.className = 'threat-card';
+    card.id = 'card-' + ev.id;
+    card.innerHTML =
+      `<div class="threat-top">
+        <span class="badge ${badgeCls}">${badgeLabel}</span>
+        <span class="threat-time">${time}</span>
+      </div>
+      <div class="threat-meta">
+        IP: <span class="ip">${escHtml(ev.ip || '?')}</span>
+        &nbsp;·&nbsp; ${escHtml(ev.method || 'GET')}
+        <span class="url"> ${escHtml(ev.url || '/')}</span>
+        ${ev.field ? `&nbsp;·&nbsp; field: <span style="color:#60a5fa;">${escHtml(ev.field)}</span>` : ''}
+      </div>
+      <div class="threat-ai" id="ai-${ev.id}">
+        ${geminiEnabled
+          ? `<div class="ai-analyzing"><div class="ai-spinner"></div> Gemini is analyzing…</div>
+             <div class="ai-result" id="res-${ev.id}"></div>`
+          : `<div class="no-gemini-note">Set GEMINI_API_KEY in .env to enable AI analysis.</div>`
+        }
+      </div>`;
+
+    feed.prepend(card);
+    cardMap[ev.id] = card;
+
+    // Keep feed to 60 cards max
+    const cards = feed.querySelectorAll('.threat-card');
+    if (cards.length > 60) cards[cards.length - 1].remove();
+  }
+
+  function updateThreatCard(ev) {
+    const resEl = document.getElementById('res-' + ev.id);
+    const aiEl  = document.getElementById('ai-' + ev.id);
+    const card  = document.getElementById('card-' + ev.id);
+    if (!resEl || !aiEl) return;
+
+    const a = ev.analysis;
+    if (!a) {
+      aiEl.innerHTML = '<div class="no-gemini-note">Analysis unavailable.</div>';
+      return;
+    }
+
+    const sev = a.severity || 0;
+
+    // Add severity badge to card header
+    if (card) {
+      const top = card.querySelector('.threat-top');
+      const existing = top.querySelector('.sev-badge');
+      if (!existing) {
+        const sb = document.createElement('span');
+        sb.className = `sev-badge sev-${sev}`;
+        sb.textContent = `SEV ${sev}`;
+        top.insertBefore(sb, top.querySelector('.threat-time'));
+      }
+    }
+
+    // Hide spinner, show result
+    const analyzing = aiEl.querySelector('.ai-analyzing');
+    if (analyzing) analyzing.style.display = 'none';
+
+    resEl.className = 'ai-result show';
+    resEl.innerHTML =
+      `<div class="ai-attack-name">⚡ ${escHtml(a.attack_name || 'Unknown Attack')}</div>
+      <div class="ai-field">
+        <div class="ai-field-label">Intent</div>
+        <div class="ai-intent">${escHtml(a.intent || '—')}</div>
+      </div>
+      <div class="ai-field">
+        <div class="ai-field-label">Technique</div>
+        <div class="ai-technique">${escHtml(a.technique || '—')}</div>
+      </div>
+      <div class="ai-field">
+        <div class="ai-field-label">Recommendation</div>
+        <div class="ai-recommend">✓ ${escHtml(a.recommendation || '—')}</div>
+      </div>`;
+  }
+
+  /* ── Session Report ─────────────────────────────────────────────────── */
+  async function generateReport() {
+    const btn     = document.getElementById('gen-btn');
+    const genEl   = document.getElementById('report-generating');
+    const reportEl = document.getElementById('report-box');
+
+    btn.disabled = true;
+    genEl.style.display    = 'flex';
+    reportEl.className     = 'report-box';
+
+    try {
+      const r    = await fetch('/ai-summary', { method: 'POST' });
+      const data = await r.json();
+      genEl.style.display = 'none';
+
+      if (!data.ok || !data.summary) {
+        reportEl.className = 'report-box show';
+        reportEl.innerHTML = `<div style="color:var(--red);font-size:.75rem;">Error: ${escHtml(data.error || 'Unknown error — check server terminal.')}</div>`;
+        btn.disabled = false;
+        return;
+      }
+
+      const s = data.summary;
+      const tlCls = 'tl-' + (s.threat_level || 'LOW');
+
+      let html =
+        `<div class="report-header">
+          <div class="report-title">Session Threat Report</div>
+          <span class="threat-level-badge ${tlCls}">${s.threat_level || 'UNKNOWN'}</span>
+        </div>`;
+
+      if (s.summary) {
+        html += `<div class="report-summary">${escHtml(s.summary)}</div>`;
+      }
+
+      html += `<div class="info-row" style="margin-bottom:10px;">
+        <span class="info-label">Total attacks</span>
+        <span class="info-val cyan">${s.total_attacks || totalThreats}</span>
+      </div>`;
+
+      if (s.dominant_attack) {
+        html += `<div class="info-row" style="margin-bottom:10px;">
+          <span class="info-label">Dominant attack</span>
+          <span class="info-val yellow">${escHtml(s.dominant_attack)}</span>
+        </div>`;
+      }
+
+      if (s.top_ips && s.top_ips.length) {
+        html += `<div class="report-section">
+          <div class="report-section-title">Top Offending IPs</div>`;
+        s.top_ips.forEach(ip => {
+          html += `<div class="report-item ip">${escHtml(ip)}</div>`;
+        });
+        html += `</div>`;
+      }
+
+      if (s.key_insights && s.key_insights.length) {
+        html += `<div class="report-section">
+          <div class="report-section-title">Key Insights</div>`;
+        s.key_insights.forEach(i => {
+          html += `<div class="report-item insight">${escHtml(i)}</div>`;
+        });
+        html += `</div>`;
+      }
+
+      if (s.recommendations && s.recommendations.length) {
+        html += `<div class="report-section">
+          <div class="report-section-title">Recommendations</div>`;
+        s.recommendations.forEach(r => {
+          html += `<div class="report-item recommend">✓ ${escHtml(r)}</div>`;
+        });
+        html += `</div>`;
+      }
+
+      const ts = new Date(data.ts).toLocaleTimeString();
+      html += `<div style="font-size:.64rem;color:var(--muted);margin-top:6px;">Generated at ${ts} · Powered by Gemini 2.0 Flash</div>`;
+
+      reportEl.className  = 'report-box show';
+      reportEl.innerHTML  = html;
+
+    } catch (err) {
+      genEl.style.display = 'none';
+      reportEl.className  = 'report-box show';
+      reportEl.innerHTML  = `<div style="color:var(--red);font-size:.75rem;">Error: ${escHtml(err.message)}</div>`;
+    }
+
+    btn.disabled = false;
+  }
+
+  function clearReport() {
+    document.getElementById('report-box').className = 'report-box';
+    document.getElementById('report-box').innerHTML = '';
+  }
+
+  function clearFeed() {
+    document.getElementById('threat-feed').innerHTML =
+      '<div class="empty-state"><div class="es-icon">🤖</div><div>Feed cleared.</div></div>';
+    totalThreats = highSeverity = sevSum = sevCount = sqlCount = xssCount = 0;
+    Object.keys(ipCounts).forEach(k => delete ipCounts[k]);
+    Object.keys(typeCounts).forEach(k => delete typeCounts[k]);
+    Object.keys(cardMap).forEach(k => delete cardMap[k]);
+    updateCounters();
+  }
+
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+  function badgeClass(type) {
+    if (type === 'SQL_INJECTION') return 'badge-sql';
+    if (type === 'XSS')          return 'badge-xss';
+    if (type === 'IP_BLACKLIST') return 'badge-ip';
+    return 'badge-rl';
+  }
+  function badgeName(type) {
+    if (type === 'SQL_INJECTION') return 'SQL INJECTION';
+    if (type === 'XSS')          return 'XSS ATTACK';
+    if (type === 'IP_BLACKLIST') return 'IP BLACKLIST';
+    if (type === 'RATE_LIMIT')   return 'RATE LIMIT';
+    return type || 'UNKNOWN';
+  }
+  function escHtml(str) {
+    return String(str || '')
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

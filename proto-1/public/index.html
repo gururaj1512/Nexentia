@@ -477,6 +477,52 @@
       overflow-y: auto;
     }
 
+    .diag-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .diag-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 8px;
+      font-size: .68rem;
+      font-family: var(--mono);
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .diag-chip.live {
+      background: #0f2a1a;
+      border-color: #1a5c3a;
+      color: var(--green);
+    }
+
+    .diag-chip.err {
+      background: #2a1010;
+      border-color: #5c1a1a;
+      color: var(--red);
+    }
+
+    .bridge-feed-row {
+      font-size: .7rem;
+      color: var(--muted);
+      font-family: var(--mono);
+      line-height: 1.45;
+      border-bottom: 1px dashed var(--border);
+      padding: 5px 0;
+      word-break: break-word;
+    }
+
+    .bridge-feed-row:last-child {
+      border-bottom: none;
+    }
+
     .clear-btn {
       background: none;
       border: none;
@@ -529,10 +575,16 @@
   </div>
   <div style="margin-left:auto;display:flex;gap:8px;">
     <a href="/waf.html" style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#fca5a5;text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid #7f1d1d;background:#1a0808;transition:all .2s;">
-      🛡️ WAF
+      WAF
     </a>
     <a href="/rate-limits.html" style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#a78bfa;text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid #3b1d8a;background:#1a1040;transition:all .2s;">
-      ⚡ Rate Limiter
+      Rate Limiter
+    </a>
+    <a href="/websocket.html" style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#67e8f9;text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid #0e7490;background:#08202a;transition:all .2s;">
+      WebSockets
+    </a>
+    <a href="/ai-analyzer.html" style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#67e8f9;text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid #0e7490;background:#08202a;transition:all .2s;">
+      Analyzer
     </a>
   </div>
 </header>
@@ -718,6 +770,11 @@
           <div id="response-status"></div>
         </div>
 
+        <div id="sender-ip-section" style="display:none">
+          <div class="res-section-label" style="color:var(--yellow)">Sender IP (from proxy)</div>
+          <div class="proof-box" id="sender-ip-box" style="color:var(--yellow);background:#2a1f08;border-color:#6b4e16;"></div>
+        </div>
+
         <!-- Body that was sent (sent body echo) -->
         <div id="sent-body-section" style="display:none">
           <div class="res-section-label" style="color:#60a5fa;">Sent Body (forwarded by proxy)</div>
@@ -755,6 +812,34 @@
         Token is auto-added to <code>Authorization: Bearer</code> header when logged in.
         Routes with <code>auth: true</code> require a valid token.
       </div>
+
+      <div class="divider"></div>
+
+      <div class="section-title">WebSocket + SSE Check</div>
+      <div class="diag-grid">
+        <div id="diag-proxy-sse" class="diag-chip">Proxy SSE: connecting</div>
+        <div id="diag-bridge-sse" class="diag-chip">Bridge SSE: connecting</div>
+        <div id="diag-ws-event" class="diag-chip">WS event: none</div>
+        <div id="diag-bridge-event" class="diag-chip">Bridge event: none</div>
+      </div>
+
+      <label>WS Test URL</label>
+      <input type="text" id="diag-ws-url" placeholder="ws://localhost:3000/public/ws" />
+
+      <label>WS Token (optional)</label>
+      <input type="text" id="diag-ws-token" placeholder="token for auth:true websocket routes" />
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+        <button class="btn btn-primary" id="diag-check-btn" onclick="runWsSseCheck()">Run WS + SSE Check</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/websocket.html'">Open WS Visualizer</button>
+      </div>
+
+      <div id="diag-result" style="display:none;"></div>
+
+      <div class="res-section-label" style="color:#67e8f9;">Proxy to Main SSE Evidence</div>
+      <div class="response-box" id="bridge-evidence-feed" style="max-height:150px;">
+        Waiting for bridge events...
+      </div>
     </div>
   </div>
 
@@ -767,6 +852,8 @@
   let routes = [];
   let activeSteps = {};
   let stepTimer = null;
+  let wsDiagEs = null;
+  let bridgeDiagEs = null;
 
   /* ── SSE ── */
   let es;
@@ -800,6 +887,8 @@
     } catch(e) { console.error(e); }
   }
   loadConfig();
+
+  initWsSseDiagnostics();
 
   /* ── ROUTES RENDER ── */
   function renderRoutes() {
@@ -908,6 +997,175 @@
     document.getElementById('auth-logged-in').style.display = '';
     document.getElementById('logged-in-user').textContent = currentUser.username + ' · ' + currentUser.email;
     document.getElementById('token-display').textContent = token;
+    document.getElementById('diag-ws-token').value = token;
+  }
+
+  function setDiagChip(id, text, state = 'neutral') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('live', 'err');
+    if (state === 'live') el.classList.add('live');
+    if (state === 'err') el.classList.add('err');
+  }
+
+  function appendBridgeEvidence(text) {
+    const feed = document.getElementById('bridge-evidence-feed');
+    if (!feed) return;
+
+    if (feed.dataset.hasRows !== '1') {
+      feed.innerHTML = '';
+      feed.dataset.hasRows = '1';
+    }
+
+    const row = document.createElement('div');
+    row.className = 'bridge-feed-row';
+    row.textContent = text;
+    feed.prepend(row);
+
+    const rows = feed.querySelectorAll('.bridge-feed-row');
+    if (rows.length > 80) rows[rows.length - 1].remove();
+  }
+
+  function formatBridgeEvent(ev) {
+    if (ev.type === 'MESSAGE' && ev.payload) {
+      const p = ev.payload;
+      const marker = p.reqId || p.connectionId || p.url || p.source || '';
+      return `${p.type}${marker ? ' | ' + marker : ''}`;
+    }
+
+    const marker = ev.source || ev.reason || ev.url || ev.error || '';
+    return `${ev.type}${marker ? ' | ' + marker : ''}`;
+  }
+
+  function initWsSseDiagnostics() {
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    document.getElementById('diag-ws-url').value = `${wsProto}://${location.host}/public/ws`;
+
+    wsDiagEs = new EventSource('/ws-events');
+    wsDiagEs.onopen = () => setDiagChip('diag-proxy-sse', 'Proxy SSE: live', 'live');
+    wsDiagEs.onerror = () => setDiagChip('diag-proxy-sse', 'Proxy SSE: reconnecting', 'err');
+    wsDiagEs.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === 'CONNECTED') return;
+        setDiagChip('diag-ws-event', `WS event: ${ev.type}`, 'live');
+      } catch (_) {}
+    };
+
+    bridgeDiagEs = new EventSource('/backend-events');
+    bridgeDiagEs.onopen = () => setDiagChip('diag-bridge-sse', 'Bridge SSE: live', 'live');
+    bridgeDiagEs.onerror = () => setDiagChip('diag-bridge-sse', 'Bridge SSE: reconnecting', 'err');
+    bridgeDiagEs.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.type === 'CONNECTED') return;
+
+        const eventLabel = ev.type === 'MESSAGE' && ev.payload?.type
+          ? ev.payload.type
+          : ev.type;
+
+        setDiagChip('diag-bridge-event', `Bridge event: ${eventLabel}`, 'live');
+        appendBridgeEvidence(`${new Date(ev.ts || Date.now()).toLocaleTimeString('en', { hour12: false })} | ${formatBridgeEvent(ev)}`);
+      } catch (_) {}
+    };
+  }
+
+  async function runWsSseCheck() {
+    const result = document.getElementById('diag-result');
+    const btn = document.getElementById('diag-check-btn');
+
+    btn.disabled = true;
+    result.className = 'msg';
+    result.style.display = '';
+    result.textContent = 'Running websocket + SSE check...';
+
+    const checks = {
+      proxySse: document.getElementById('diag-proxy-sse').classList.contains('live'),
+      bridgeSse: document.getElementById('diag-bridge-sse').classList.contains('live'),
+      wsOpen: false,
+      wsEcho: false,
+    };
+
+    let wsUrl;
+    try {
+      const parsed = new URL(document.getElementById('diag-ws-url').value.trim());
+      const tokenValue = document.getElementById('diag-ws-token').value.trim();
+      if (tokenValue && !parsed.searchParams.get('token') && !parsed.searchParams.get('access_token')) {
+        parsed.searchParams.set('token', tokenValue);
+      }
+      wsUrl = parsed.toString();
+    } catch (_) {
+      result.className = 'msg err';
+      result.textContent = 'Invalid websocket URL. Provide ws:// or wss:// URL.';
+      btn.disabled = false;
+      return;
+    }
+
+    try {
+      await new Promise((resolve, reject) => {
+        let done = false;
+        let socket;
+
+        const finish = (ok, err) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeout);
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+          if (ok) resolve();
+          else reject(err);
+        };
+
+        const timeout = setTimeout(() => {
+          finish(false, new Error('WebSocket check timed out'));
+        }, 8000);
+
+        try {
+          socket = new WebSocket(wsUrl);
+        } catch (err) {
+          finish(false, err);
+          return;
+        }
+
+        socket.onopen = () => {
+          checks.wsOpen = true;
+          socket.send(JSON.stringify({ type: 'diag-ping', ts: Date.now() }));
+        };
+
+        socket.onmessage = () => {
+          checks.wsEcho = true;
+          finish(true);
+        };
+
+        socket.onclose = (ev) => {
+          if (!checks.wsEcho) {
+            finish(false, new Error(`Socket closed before echo (code ${ev.code})`));
+          }
+        };
+
+        socket.onerror = () => {
+          // Keep waiting for close or timeout for detailed outcome.
+        };
+      });
+    } catch (err) {
+      result.className = 'msg err';
+      result.textContent = `Check failed: ${err.message}`;
+      btn.disabled = false;
+      return;
+    }
+
+    const pass = checks.proxySse && checks.bridgeSse && checks.wsOpen && checks.wsEcho;
+    result.className = pass ? 'msg ok' : 'msg err';
+    result.innerHTML = [
+      `Proxy SSE: ${checks.proxySse ? 'OK' : 'NOT LIVE'}`,
+      `Bridge SSE: ${checks.bridgeSse ? 'OK' : 'NOT LIVE'}`,
+      `WebSocket Upgrade: ${checks.wsOpen ? 'OK' : 'FAILED'}`,
+      `WebSocket Echo: ${checks.wsEcho ? 'OK' : 'FAILED'}`,
+    ].join('<br/>');
+
+    btn.disabled = false;
   }
 
   /* ── JSON SYNTAX HIGHLIGHTER ── */
@@ -967,6 +1225,7 @@
     resetSteps();
 
     // Hide previous response sections
+    document.getElementById('sender-ip-section').style.display   = 'none';
     document.getElementById('sent-body-section').style.display   = 'none';
     document.getElementById('recv-body-section').style.display   = 'none';
     document.getElementById('proxy-proof-section').style.display = 'none';
@@ -986,6 +1245,12 @@
 
       const area = document.getElementById('response-area');
       area.style.display = '';
+
+      const senderIp = r.headers.get('x-sender-ip') || parsed?.requesterIp || parsed?.ip || null;
+      if (senderIp) {
+        document.getElementById('sender-ip-section').style.display = '';
+        document.getElementById('sender-ip-box').innerHTML = highlight(JSON.stringify({ senderIp }, null, 2));
+      }
 
       const cls = r.status < 300 ? 'status-2xx' : r.status < 500 ? 'status-4xx' : 'status-5xx';
       document.getElementById('response-status').innerHTML =

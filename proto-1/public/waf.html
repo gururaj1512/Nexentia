@@ -161,6 +161,78 @@
       margin: 3px 3px 0 0;
     }
 
+    .ip-track-list {
+      margin-top: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+    .ip-track-list::-webkit-scrollbar { width: 4px; }
+    .ip-track-list::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .ip-track-row {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 8px;
+      background: var(--surface3);
+    }
+
+    .ip-track-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .ip-track-ip {
+      font-family: var(--mono);
+      color: var(--text);
+      font-size: .72rem;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    .ip-track-meta {
+      font-size: .67rem;
+      color: var(--muted);
+      line-height: 1.6;
+      font-family: var(--mono);
+    }
+
+    .tiny-btn-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .tiny-btn {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--surface2);
+      color: var(--text);
+      font-size: .64rem;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 3px 8px;
+      font-family: var(--font);
+    }
+
+    .tiny-btn:hover { border-color: var(--blue); }
+    .tiny-btn.block { color: #fca5a5; border-color: #7f1d1d; background: #2a0a0a; }
+    .tiny-btn.unblock { color: #86efac; border-color: #14532d; background: #0a1a10; }
+
+    .ip-msg {
+      margin-top: 8px;
+      border-radius: 6px;
+      padding: 7px 9px;
+      font-size: .7rem;
+      font-family: var(--mono);
+      display: none;
+    }
+    .ip-msg.show { display: block; }
+    .ip-msg.ok { background: #081a10; border: 1px solid #14532d; color: #86efac; }
+    .ip-msg.err { background: #1a0808; border: 1px solid #7f1d1d; color: #fca5a5; }
+
     /* Pattern list */
     .pattern-list { max-height: 0; overflow: hidden; transition: max-height .3s; }
     .pattern-list.open { max-height: 500px; }
@@ -395,6 +467,7 @@
   <span id="conn-label">Connecting…</span>
   <nav class="nav-links">
     <a class="nav-link" href="/rate-limits.html">⚡ Rate Limiter</a>
+    <a class="nav-link" href="/ai-analyzer.html">⚡ Analyzer</a>
     <a class="nav-link" href="/">← Proxy Engine</a>
   </nav>
 </header>
@@ -501,6 +574,9 @@
       <div class="divider"></div>
       <div class="section-title">WAF Response Headers</div>
       <div style="font-size:.71rem;color:var(--muted);line-height:1.8;">
+        Sender IP header on all responses:<br>
+        <code style="color:var(--yellow);">X-Sender-IP: client-ip</code>
+        <br><br>
         Blocked SQL / XSS:<br>
         <code style="color:var(--red);">HTTP 400 Bad Request</code><br>
         <code style="color:#60a5fa;">{ error, reason, type, field, blocked }</code>
@@ -527,6 +603,8 @@
 <script>
   /* ── COUNTERS ─────────────────────────────────────────────────────── */
   let cntSql = 0, cntXss = 0, cntIp = 0, cntClean = 0, cntTotal = 0;
+  let wafConfigCache = null;
+  let ipTrackingCache = { trackedIps: [], blacklist: [] };
 
   function updateCounters() {
     document.getElementById('cnt-sql').textContent   = cntSql;
@@ -540,19 +618,19 @@
     document.getElementById('s-rate').textContent = pct + '%';
   }
 
-  /* ── SSE ─────────────────────────────────────────────────────────── */
-  let es;
+  /* ── WAF SSE ─────────────────────────────────────────────────────── */
+  let wafEs;
   function connectSSE() {
-    es = new EventSource('/waf-events');
-    es.onopen = () => {
+    wafEs = new EventSource('/waf-events');
+    wafEs.onopen = () => {
       document.getElementById('conn-dot').classList.add('live');
       document.getElementById('conn-label').textContent = 'Live';
     };
-    es.onerror = () => {
+    wafEs.onerror = () => {
       document.getElementById('conn-dot').classList.remove('live');
       document.getElementById('conn-label').textContent = 'Reconnecting…';
     };
-    es.onmessage = (e) => {
+    wafEs.onmessage = (e) => {
       const ev = JSON.parse(e.data);
       handleEvent(ev);
     };
@@ -562,44 +640,24 @@
   function handleEvent(ev) {
     if (ev.type === 'CONNECTED') return;
     cntTotal++;
-    if (ev.type === 'BLOCKED') {
-      if (ev.type2 === 'SQL_INJECTION' || ev.wafType === 'SQL_INJECTION' || ev.type === 'BLOCKED' && ev.blockType === 'SQL_INJECTION') {
-        // handled below
-      }
-      // Use ev.type from the inner payload
-      const t = ev.attackType || ev.wafType || ev.blockType || ev.t || '';
-      if (ev.type === 'BLOCKED') {
-        const inner = ev;
-        if (inner.type === 'SQL_INJECTION' || inner.type === 'BLOCKED' && inner.rule && inner.rule.includes('SQL')) cntSql++;
-        else if (inner.type === 'XSS') cntXss++;
-        else if (inner.type === 'IP_BLACKLIST') cntIp++;
-        // re-check using the actual field from the event
-        const actualType = inner.type; // comes from waf:blocked emit
-        if (actualType === 'SQL_INJECTION') { if (cntSql === 0 || true) {} }
-      }
-      appendIncident(ev);
-    } else if (ev.type === 'ALLOWED') {
-      cntClean++;
-    }
-    updateCounters();
-  }
-
-  /* The server emits: { type:'BLOCKED', ts, ip, method, url, type (attack type), field, rule, payload }
-     We need to distinguish attackType from the SSE envelope type.
-     Let's fix: the middleware emits waf:blocked with { type:'SQL_INJECTION'|'XSS'|'IP_BLACKLIST', ... }
-     index.js wraps as { type:'BLOCKED', ...d }
-     So ev.type === 'BLOCKED', and inside ev we have the original fields including ev.type which got overwritten.
-     We need to look at ev differently. */
-
-  function handleEvent(ev) { // override
-    if (ev.type === 'CONNECTED') return;
-    cntTotal++;
     if      (ev.type === 'SQL_INJECTION') { cntSql++; appendIncident(ev); }
     else if (ev.type === 'XSS')           { cntXss++; appendIncident(ev); }
     else if (ev.type === 'IP_BLACKLIST')  { cntIp++;  appendIncident(ev); }
     else if (ev.type === 'ALLOWED')       { cntClean++; }
     updateCounters();
   }
+
+  /* ── IP EVENTS (track + blacklist changes) ──────────────────────── */
+  let ipEs;
+  function connectIpEvents() {
+    ipEs = new EventSource('/ip-events');
+    ipEs.onmessage = (e) => {
+      const ev = JSON.parse(e.data);
+      if (ev.type === 'CONNECTED') return;
+      loadIpTracking();
+    };
+  }
+  connectIpEvents();
 
   /* ── INCIDENT FEED ───────────────────────────────────────────────── */
   function appendIncident(ev) {
@@ -654,10 +712,60 @@
   function loadConfig() {
     fetch('/waf-config')
       .then(r => r.json())
-      .then(cfg => { renderConfig(cfg); renderPatterns(cfg); })
+      .then(cfg => {
+        wafConfigCache = cfg;
+        renderConfig(cfg);
+        renderPatterns(cfg);
+      })
       .catch(e => console.error(e));
   }
+
+  function loadIpTracking() {
+    fetch('/ip-tracking?limit=120')
+      .then(r => r.json())
+      .then(snapshot => {
+        ipTrackingCache = snapshot;
+        if (wafConfigCache) renderConfig(wafConfigCache);
+      })
+      .catch(e => console.error(e));
+  }
+
   loadConfig();
+  loadIpTracking();
+  setInterval(loadIpTracking, 5000);
+
+  function shortMethods(methodMap) {
+    const list = Object.entries(methodMap || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (list.length === 0) return '-';
+    return list.map(([m, c]) => `${m}:${c}`).join('  ');
+  }
+
+  function renderTrackedIps() {
+    const list = ipTrackingCache.trackedIps || [];
+    if (list.length === 0) {
+      return '<div style="font-size:.7rem;color:var(--muted);">No traffic tracked yet.</div>';
+    }
+
+    return '<div class="ip-track-list">' + list.map(item => {
+      const actionBtn = item.isBlacklisted
+        ? `<button class="tiny-btn unblock" onclick='unblacklistIp("${encodeURIComponent(item.ip)}")'>unblock</button>`
+        : `<button class="tiny-btn block" onclick='blacklistIp("${encodeURIComponent(item.ip)}")'>blacklist</button>`;
+
+      return '<div class="ip-track-row">' +
+        '<div class="ip-track-head">' +
+          '<span class="ip-track-ip">' + escHtml(item.ip) + '</span>' +
+          (item.isBlacklisted ? '<span class="ip-chip" style="margin:0">&#128683; blocked</span>' : '') +
+        '</div>' +
+        '<div class="ip-track-meta">' +
+          'requests=' + item.totalRequests +
+          '  blocked=' + item.blockedRequests + '<br>' +
+          'last=' + escHtml(item.lastMethod || '-') + ' ' + escHtml(item.lastUrl || '-') + '<br>' +
+          'methods=' + escHtml(shortMethods(item.methods)) +
+        '</div>' +
+        '<div class="tiny-btn-row">' + actionBtn + '</div>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
 
   function renderConfig(cfg) {
     const el = document.getElementById('security-config');
@@ -671,6 +779,8 @@
       .map(ip => '<span class="ip-chip">&#128683; ' + escHtml(ip) + '</span>')
       .join('') || '<span style="color:var(--muted);font-size:.72rem;">None configured</span>';
 
+    const trackedIpsHtml = renderTrackedIps();
+
     el.innerHTML =
       '<div class="cfg-card">' +
         '<h3>&#128274; Attack Prevention</h3>' +
@@ -683,9 +793,20 @@
       '<div class="cfg-card">' +
         '<h3>&#128683; IP Blacklist</h3>' +
         '<div style="margin-top:4px;">' + ips + '</div>' +
-        '<div style="margin-top:8px;font-size:.68rem;color:var(--muted);">' +
-          'Edit <code>config.json &rarr; security.blacklisted_ips[]</code> and restart.' +
+        '<label>IP address</label>' +
+        '<input type="text" id="ip-manual" placeholder="203.0.113.42" />' +
+        '<label>Reason</label>' +
+        '<input type="text" id="ip-reason" placeholder="Manual block from dashboard" />' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">' +
+          '<button class="btn btn-red" style="margin-top:0;padding:7px 10px;font-size:.72rem;" onclick="blacklistFromInputs()">Blacklist</button>' +
+          '<button class="btn btn-secondary" style="margin-top:0;padding:7px 10px;font-size:.72rem;" onclick="unblacklistFromInputs()">Unblacklist</button>' +
         '</div>' +
+        '<div id="ip-msg" class="ip-msg"></div>' +
+      '</div>' +
+      '<div class="cfg-card">' +
+        '<h3>&#128064; Sender IP Tracker</h3>' +
+        '<div style="font-size:.68rem;color:var(--muted);margin-bottom:6px;">Live from <code>/ip-tracking</code> and <code>/ip-events</code>.</div>' +
+        trackedIpsHtml +
       '</div>' +
       '<div class="cfg-card">' +
         '<h3>&#128203; Signature Counts</h3>' +
@@ -698,9 +819,93 @@
         '<h3 style="font-size:.74rem;color:var(--muted);margin-bottom:6px;">Config Location</h3>' +
         '<code style="font-size:.68rem;color:#60a5fa;">config.json &rarr; security.*</code>' +
         '<div style="margin-top:6px;font-size:.68rem;color:var(--muted);line-height:1.6;">' +
-          'block_sql_injection, block_xss,<br>scan_body, scan_query, blacklisted_ips[]' +
+          'Runtime blacklist is now editable from this dashboard.' +
         '</div>' +
       '</div>';
+  }
+
+  function setIpMsg(text, ok = true) {
+    const el = document.getElementById('ip-msg');
+    if (!el) return;
+    el.className = 'ip-msg show ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+  }
+
+  async function blacklistIp(encodedIp) {
+    const ip = decodeURIComponent(encodedIp || '');
+    try {
+      const r = await fetch('/ip-blacklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip, reason: 'Blocked from IP tracker row' }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'failed to blacklist');
+      setIpMsg(`Blacklisted ${ip}`);
+      await Promise.all([loadConfig(), loadIpTracking()]);
+    } catch (err) {
+      setIpMsg(`Failed to blacklist ${ip}: ${err.message}`, false);
+    }
+  }
+
+  async function unblacklistIp(encodedIp) {
+    const ip = decodeURIComponent(encodedIp || '');
+    try {
+      const r = await fetch('/ip-blacklist', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'failed to remove');
+      setIpMsg(`Removed ${ip} from blacklist`);
+      await Promise.all([loadConfig(), loadIpTracking()]);
+    } catch (err) {
+      setIpMsg(`Failed to remove ${ip}: ${err.message}`, false);
+    }
+  }
+
+  function blacklistFromInputs() {
+    const ip = document.getElementById('ip-manual')?.value.trim();
+    const reason = document.getElementById('ip-reason')?.value.trim() || 'Manual block from dashboard';
+    if (!ip) {
+      setIpMsg('Provide an IP address first.', false);
+      return;
+    }
+    fetch('/ip-blacklist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, reason }),
+    })
+      .then(r => r.json().then(data => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || 'failed to blacklist');
+        setIpMsg(`Blacklisted ${ip}`);
+        loadConfig();
+        loadIpTracking();
+      })
+      .catch(err => setIpMsg(`Failed to blacklist ${ip}: ${err.message}`, false));
+  }
+
+  function unblacklistFromInputs() {
+    const ip = document.getElementById('ip-manual')?.value.trim();
+    if (!ip) {
+      setIpMsg('Provide an IP address first.', false);
+      return;
+    }
+    fetch('/ip-blacklist', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip }),
+    })
+      .then(r => r.json().then(data => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.error || 'failed to remove');
+        setIpMsg(`Removed ${ip} from blacklist`);
+        loadConfig();
+        loadIpTracking();
+      })
+      .catch(err => setIpMsg(`Failed to remove ${ip}: ${err.message}`, false));
   }
 
   function renderPatterns(cfg) {
@@ -792,6 +997,7 @@
       const text = await r.text();
       let parsed = null;
       try { parsed = JSON.parse(text); } catch(_) {}
+      const senderIp = r.headers.get('x-sender-ip') || parsed?.ip || parsed?.requesterIp || 'unknown';
 
       resEl.style.display = 'block';
 
@@ -802,6 +1008,7 @@
         const rule   = parsed?.blocked || '—';
         resEl.textContent =
           `🚫 BLOCKED  HTTP ${r.status}\n` +
+          `Sender IP: ${senderIp}\n` +
           `Type:   ${type}\n` +
           `Reason: ${reason}\n` +
           `Rule:   ${rule}`;
@@ -809,6 +1016,7 @@
         resEl.className = 'result-box show res-allowed';
         resEl.textContent =
           `✅ ALLOWED  HTTP ${r.status}\n` +
+          `Sender IP: ${senderIp}\n` +
           `Response: ${text.slice(0, 300)}`;
       }
     } catch(e) {

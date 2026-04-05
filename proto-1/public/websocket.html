@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebSocket Observatory - Nexentia</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0f14;
+      --surface: #141720;
+      --surface2: #1c2030;
+      --surface3: #242a3d;
+      --border: #252a3a;
+      --accent: #4f8ef7;
+      --teal: #06b6d4;
+      --green: #22c55e;
+      --yellow: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --mono: 'Cascadia Code', 'Fira Code', monospace;
+      --font: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at 15% -10%, #1d2946 0%, var(--bg) 40%), var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+    }
+
+    .pill {
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: .68rem;
+    }
+
+    .status-set {
+      margin-left: auto;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .72rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .25s, box-shadow .25s;
+    }
+
+    .dot.live {
+      background: var(--green);
+      box-shadow: 0 0 8px rgba(34, 197, 94, .8);
+    }
+
+    .nav-link {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--muted);
+      font-size: .72rem;
+      text-decoration: none;
+      transition: border-color .2s, color .2s;
+    }
+
+    .nav-link:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 360px 1fr 360px;
+      height: calc(100vh - 64px);
+      overflow: hidden;
+    }
+
+    .panel {
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .panel:last-child {
+      border-right: none;
+    }
+
+    .panel-header {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .panel-body {
+      padding: 14px;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .panel-body::-webkit-scrollbar { width: 4px; }
+    .panel-body::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .section-title {
+      font-size: .67rem;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: 8px;
+      margin-top: 14px;
+    }
+
+    .section-title:first-child {
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: .73rem;
+      margin-bottom: 4px;
+      margin-top: 8px;
+    }
+
+    input, textarea {
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      padding: 8px 9px;
+      font-size: .78rem;
+      font-family: var(--mono);
+      outline: none;
+    }
+
+    input:focus, textarea:focus {
+      border-color: var(--accent);
+    }
+
+    textarea {
+      min-height: 74px;
+      resize: vertical;
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 6px;
+      font-size: .78rem;
+      padding: 9px 8px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform .08s, opacity .2s;
+    }
+
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-danger { background: #7f1d1d; color: #fecaca; }
+    .btn-alt { background: var(--surface3); color: var(--text); border: 1px solid var(--border); }
+
+    .small-note {
+      color: var(--muted);
+      font-size: .7rem;
+      margin-top: 8px;
+      line-height: 1.55;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+      padding: 9px;
+      text-align: center;
+    }
+
+    .metric-value {
+      font-size: 1.25rem;
+      font-weight: 800;
+      font-family: var(--mono);
+      line-height: 1.1;
+    }
+
+    .metric-label {
+      font-size: .62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-top: 3px;
+    }
+
+    .flow-wrap {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, #151a28 0%, #10131d 100%);
+      padding: 16px 10px 12px;
+    }
+
+    .flow-diagram {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 10px;
+    }
+
+    .flow-node {
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      background: var(--surface2);
+      padding: 12px;
+      min-width: 108px;
+      text-align: center;
+      transition: border-color .25s, box-shadow .25s;
+    }
+
+    .flow-node.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 16px rgba(79, 142, 247, .35);
+    }
+
+    .flow-node.error {
+      border-color: var(--red);
+      box-shadow: 0 0 16px rgba(239, 68, 68, .35);
+    }
+
+    .node-title {
+      font-size: .72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--muted);
+    }
+
+    .node-meta {
+      margin-top: 2px;
+      font-size: .7rem;
+      font-family: var(--mono);
+      color: var(--text);
+    }
+
+    .flow-arrow {
+      width: 80px;
+      padding: 0 5px;
+      text-align: center;
+    }
+
+    .line {
+      height: 2px;
+      background: var(--border);
+      position: relative;
+      overflow: hidden;
+      margin: 3px 0;
+    }
+
+    .line::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+    }
+
+    .line.pulse-fwd::after {
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: pulseForward .55s ease;
+    }
+
+    .line.pulse-back::after {
+      background: linear-gradient(270deg, transparent, var(--green), transparent);
+      animation: pulseBackward .55s ease;
+    }
+
+    .line.pulse-err::after {
+      background: linear-gradient(90deg, transparent, var(--red), transparent);
+      animation: pulseForward .55s ease;
+    }
+
+    .arrow-label {
+      font-family: var(--mono);
+      font-size: .62rem;
+      color: var(--muted);
+      min-height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 1.25;
+    }
+
+    .stages {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .stage {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: .66rem;
+      font-weight: 700;
+      color: var(--muted);
+      background: var(--surface2);
+      transition: all .25s;
+    }
+
+    .stage.active { border-color: var(--accent); color: var(--text); }
+    .stage.done { border-color: var(--green); color: var(--green); }
+    .stage.err { border-color: var(--red); color: var(--red); }
+
+    .current-session {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface2);
+      padding: 8px;
+      font-size: .69rem;
+      color: var(--muted);
+      font-family: var(--mono);
+      line-height: 1.45;
+      min-height: 72px;
+    }
+
+    .feed {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: 220px;
+      max-height: 420px;
+      background: var(--surface2);
+      overflow-y: auto;
+    }
+
+    .feed-row {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      font-size: .69rem;
+      animation: fadeIn .15s ease;
+    }
+
+    .feed-row:last-child { border-bottom: none; }
+    .feed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+
+    .tag {
+      display: inline-block;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: .6rem;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      border: 1px solid;
+    }
+
+    .tag-open { color: #86efac; border-color: #14532d; background: #0d2114; }
+    .tag-msg-up { color: #7dd3fc; border-color: #1e3a5f; background: #101e31; }
+    .tag-msg-down { color: #93c5fd; border-color: #1e3a5f; background: #101d2d; }
+    .tag-close { color: #fca5a5; border-color: #7f1d1d; background: #2a1212; }
+    .tag-reject { color: #fcd34d; border-color: #854d0e; background: #2d210f; }
+    .tag-error { color: #fca5a5; border-color: #7f1d1d; background: #2a1212; }
+    .tag-bridge { color: #67e8f9; border-color: #0e7490; background: #08202a; }
+
+    .feed-time {
+      margin-left: auto;
+      font-family: var(--mono);
+      color: var(--muted);
+      font-size: .62rem;
+    }
+
+    .feed-detail {
+      color: var(--muted);
+      line-height: 1.4;
+      word-break: break-word;
+      font-family: var(--mono);
+    }
+
+    .chat {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+      max-height: 210px;
+      overflow-y: auto;
+      padding: 8px;
+      font-family: var(--mono);
+      font-size: .7rem;
+    }
+
+    .chat-row { margin-bottom: 6px; line-height: 1.45; }
+    .chat-row.me { color: #7dd3fc; }
+    .chat-row.server { color: #86efac; }
+    .chat-row.sys { color: var(--muted); }
+
+    .row-end {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .inline-tick {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: .72rem;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: .67rem;
+      margin-top: 8px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+
+    .clear-link {
+      margin-left: auto;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: .66rem;
+      border: none;
+      background: none;
+    }
+
+    .clear-link:hover { color: var(--text); }
+
+    .bridge-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .bridge-card {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface2);
+      padding: 8px;
+      text-align: center;
+    }
+
+    .bridge-card .value {
+      font-size: 1rem;
+      font-weight: 800;
+      font-family: var(--mono);
+      line-height: 1.1;
+    }
+
+    .bridge-card .name {
+      color: var(--muted);
+      font-size: .62rem;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+    }
+
+    @keyframes pulseForward {
+      from { left: -100%; }
+      to { left: 100%; }
+    }
+
+    @keyframes pulseBackward {
+      from { left: 100%; }
+      to { left: -100%; }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1240px) {
+      .workspace {
+        grid-template-columns: 340px 1fr;
+      }
+
+      .panel-right {
+        grid-column: 1 / span 2;
+        border-top: 1px solid var(--border);
+        border-right: none;
+      }
+    }
+
+    @media (max-width: 880px) {
+      .workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .panel {
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .panel:last-child {
+        border-bottom: none;
+      }
+
+      .panel-body {
+        max-height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>WebSocket Observatory</h1>
+  <span class="pill">Bidirectional Proxy Flow</span>
+  <span class="pill">Proxy-Main SSE Bridge</span>
+
+  <div class="status-set">
+    <span class="status-chip"><span id="proxy-dot" class="dot"></span><span id="proxy-status">Proxy SSE: connecting</span></span>
+    <span class="status-chip"><span id="bridge-dot" class="dot"></span><span id="bridge-status">Bridge SSE: connecting</span></span>
+    <a class="nav-link" href="/">Proxy Engine</a>
+    <a class="nav-link" href="/rate-limits.html">Rate Limiter</a>
+    <a class="nav-link" href="/waf.html">WAF</a>
+  </div>
+</header>
+
+<main class="workspace">
+  <section class="panel panel-left">
+    <div class="panel-header">WebSocket Test Client</div>
+    <div class="panel-body">
+      <div class="section-title">Connection</div>
+      <label for="ws-url">WebSocket URL</label>
+      <input id="ws-url" type="text" value="ws://localhost:3000/public/ws" />
+
+      <label for="ws-token">Auth token (optional, for auth:true routes)</label>
+      <input id="ws-token" type="text" placeholder="JWT token" />
+
+      <div class="btn-row">
+        <button id="btn-connect" class="btn btn-primary" onclick="connectClientWs()">Connect</button>
+        <button id="btn-disconnect" class="btn btn-danger" onclick="disconnectClientWs()" disabled>Disconnect</button>
+      </div>
+
+      <div class="inline-tick">
+        <input id="auto-ping" type="checkbox" style="width:auto" onchange="toggleAutoPing()" />
+        <label for="auto-ping" style="margin:0">Send ping every 3s while connected</label>
+      </div>
+
+      <div class="mini" id="protocol-meta">Protocol: - | Target protocol: -</div>
+
+      <div class="section-title">Traffic Counters</div>
+      <div class="metrics">
+        <div class="metric"><div id="m-active" class="metric-value">0</div><div class="metric-label">Active</div></div>
+        <div class="metric"><div id="m-opened" class="metric-value">0</div><div class="metric-label">Opened</div></div>
+        <div class="metric"><div id="m-closed" class="metric-value">0</div><div class="metric-label">Closed</div></div>
+        <div class="metric"><div id="m-rejected" class="metric-value">0</div><div class="metric-label">Rejected</div></div>
+        <div class="metric"><div id="m-up" class="metric-value">0 B</div><div class="metric-label">Upstream</div></div>
+        <div class="metric"><div id="m-down" class="metric-value">0 B</div><div class="metric-label">Downstream</div></div>
+      </div>
+
+      <div class="section-title">Send Message</div>
+      <textarea id="ws-message" placeholder='{"type":"chat","text":"hello"}'></textarea>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-send" onclick="sendClientMessage()" disabled>Send</button>
+        <button class="btn btn-alt" onclick="insertSamplePayload()">Sample</button>
+      </div>
+
+      <div class="section-title">Client / Backend Chat</div>
+      <div id="chat-box" class="chat"></div>
+      <div class="small-note">Use this panel to generate real websocket traffic. The center and right panels update from SSE streams in real time.</div>
+    </div>
+  </section>
+
+  <section class="panel panel-center">
+    <div class="panel-header">
+      Flow Visualization
+      <button class="clear-link" onclick="clearProxyFeed()">clear</button>
+    </div>
+    <div class="panel-body">
+      <div class="flow-wrap">
+        <div class="flow-diagram">
+          <div id="node-client" class="flow-node">
+            <div class="node-title">Client</div>
+            <div class="node-meta">Browser</div>
+          </div>
+
+          <div class="flow-arrow">
+            <div class="line" id="line-c2p"></div>
+            <div class="arrow-label" id="label-c2p">idle</div>
+          </div>
+
+          <div id="node-proxy" class="flow-node">
+            <div class="node-title">Proxy</div>
+            <div class="node-meta">:3000</div>
+          </div>
+
+          <div class="flow-arrow">
+            <div class="line" id="line-p2b"></div>
+            <div class="arrow-label" id="label-p2b">idle</div>
+          </div>
+
+          <div id="node-backend" class="flow-node">
+            <div class="node-title">Main Server</div>
+            <div class="node-meta" id="backend-target">unknown</div>
+          </div>
+        </div>
+
+        <div class="stages">
+          <span class="stage" id="stage-HANDSHAKE">1. Handshake</span>
+          <span class="stage" id="stage-UPGRADE">2. Upgrade</span>
+          <span class="stage" id="stage-TRAFFIC">3. Traffic</span>
+          <span class="stage" id="stage-CLOSED">4. Close</span>
+        </div>
+
+        <div id="session-box" class="current-session">No active websocket request yet.</div>
+      </div>
+
+      <div class="section-title">Proxy Event Feed (/ws-events)</div>
+      <div id="proxy-feed" class="feed"></div>
+    </div>
+  </section>
+
+  <section class="panel panel-right">
+    <div class="panel-header">
+      Main Server Bridge
+      <button class="clear-link" onclick="clearBridgeFeed()">clear</button>
+    </div>
+    <div class="panel-body">
+      <div class="small-note">Proxy subscribes to main server internal SSE at /internal/events and republishes to this UI at /backend-events.</div>
+
+      <div class="bridge-grid">
+        <div class="bridge-card"><div id="b-active" class="value">0</div><div class="name">WS Active</div></div>
+        <div class="bridge-card"><div id="b-http" class="value">0</div><div class="name">HTTP In</div></div>
+        <div class="bridge-card"><div id="b-wsin" class="value">0</div><div class="name">WS In</div></div>
+        <div class="bridge-card"><div id="b-wsout" class="value">0</div><div class="name">WS Out</div></div>
+      </div>
+
+      <div class="section-title">Bridge Feed (/backend-events)</div>
+      <div id="bridge-feed" class="feed"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const FLOW_STAGES = ['HANDSHAKE', 'UPGRADE', 'TRAFFIC', 'CLOSED'];
+
+  const state = {
+    ws: null,
+    pingTimer: null,
+    proxyEs: null,
+    bridgeEs: null,
+    activeReqId: null,
+    metrics: {
+      active: 0,
+      opened: 0,
+      closed: 0,
+      rejected: 0,
+      errors: 0,
+      upBytes: 0,
+      downBytes: 0,
+      upChunks: 0,
+      downChunks: 0,
+    },
+    backend: {
+      activeWs: 0,
+      httpInbound: 0,
+      wsIn: 0,
+      wsOut: 0,
+      bridgeErrors: 0,
+    },
+    sessions: new Map(),
+  };
+
+  function byId(id) {
+    return document.getElementById(id);
+  }
+
+  function nowTime(ts) {
+    return new Date(ts || Date.now()).toLocaleTimeString('en', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function pulseLine(id, mode) {
+    const line = byId(id);
+    line.classList.remove('pulse-fwd', 'pulse-back', 'pulse-err');
+    void line.offsetWidth;
+    line.classList.add(mode);
+    setTimeout(() => line.classList.remove(mode), 600);
+  }
+
+  function resetFlowNodeState() {
+    ['node-client', 'node-proxy', 'node-backend'].forEach((id) => {
+      byId(id).classList.remove('active', 'error');
+    });
+  }
+
+  function setStage(stage, errorText) {
+    const idx = FLOW_STAGES.indexOf(stage);
+    FLOW_STAGES.forEach((s, i) => {
+      const el = byId(`stage-${s}`);
+      el.className = 'stage';
+      if (errorText && i === idx) {
+        el.classList.add('err');
+        return;
+      }
+      if (i < idx) el.classList.add('done');
+      if (i === idx) el.classList.add('active');
+    });
+  }
+
+  function setStatus(dotId, labelId, live, text) {
+    const dot = byId(dotId);
+    if (live) dot.classList.add('live');
+    else dot.classList.remove('live');
+    byId(labelId).textContent = text;
+  }
+
+  function renderMetrics() {
+    byId('m-active').textContent = String(state.metrics.active);
+    byId('m-opened').textContent = String(state.metrics.opened);
+    byId('m-closed').textContent = String(state.metrics.closed);
+    byId('m-rejected').textContent = String(state.metrics.rejected);
+    byId('m-up').textContent = formatBytes(state.metrics.upBytes);
+    byId('m-down').textContent = formatBytes(state.metrics.downBytes);
+  }
+
+  function renderBackendMetrics() {
+    byId('b-active').textContent = String(state.backend.activeWs);
+    byId('b-http').textContent = String(state.backend.httpInbound);
+    byId('b-wsin').textContent = String(state.backend.wsIn);
+    byId('b-wsout').textContent = String(state.backend.wsOut);
+  }
+
+  function addChatRow(kind, message) {
+    const box = byId('chat-box');
+    const row = document.createElement('div');
+    row.className = `chat-row ${kind}`;
+    row.textContent = `${nowTime()} | ${message}`;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function appendFeed(feedId, eventType, detailText, ts) {
+    const feed = byId(feedId);
+    const row = document.createElement('div');
+    row.className = 'feed-row';
+
+    let tagClass = 'tag-bridge';
+    if (eventType === 'OPENED') tagClass = 'tag-open';
+    if (eventType === 'MESSAGE_UP') tagClass = 'tag-msg-up';
+    if (eventType === 'MESSAGE_DOWN') tagClass = 'tag-msg-down';
+    if (eventType === 'CLOSED') tagClass = 'tag-close';
+    if (eventType === 'REJECTED') tagClass = 'tag-reject';
+    if (eventType === 'ERROR') tagClass = 'tag-error';
+
+    row.innerHTML = `
+      <div class="feed-head">
+        <span class="tag ${tagClass}">${eventType}</span>
+        <span class="feed-time">${nowTime(ts)}</span>
+      </div>
+      <div class="feed-detail">${detailText}</div>
+    `;
+
+    feed.prepend(row);
+    const rows = feed.querySelectorAll('.feed-row');
+    if (rows.length > 250) rows[rows.length - 1].remove();
+  }
+
+  function clearProxyFeed() {
+    byId('proxy-feed').innerHTML = '';
+  }
+
+  function clearBridgeFeed() {
+    byId('bridge-feed').innerHTML = '';
+  }
+
+  function updateSessionBox(message) {
+    byId('session-box').textContent = message;
+  }
+
+  function updateProtocolMeta(clientProtocol, targetProtocol) {
+    byId('protocol-meta').textContent = `Protocol: ${clientProtocol || '-'} | Target protocol: ${targetProtocol || '-'}`;
+  }
+
+  function handleProxyEvent(ev) {
+    if (ev.type === 'CONNECTED') return;
+
+    if (ev.type === 'OPENING') {
+      resetFlowNodeState();
+      byId('node-client').classList.add('active');
+      byId('node-proxy').classList.add('active');
+      byId('backend-target').textContent = ev.target || 'unknown';
+      byId('label-c2p').textContent = `${ev.url || ''}`;
+      byId('label-p2b').textContent = `${ev.forwardedPath || ''}`;
+      pulseLine('line-c2p', 'pulse-fwd');
+      setStage('HANDSHAKE');
+
+      appendFeed(
+        'proxy-feed',
+        'OPENING',
+        `${ev.reqId || '-'} | route ${ev.route || '-'} | target ${ev.target || '-'} | auth ${ev.authRequired ? 'yes' : 'no'}`,
+        ev.ts,
+      );
+      return;
+    }
+
+    if (ev.type === 'OPENED') {
+      state.metrics.active += 1;
+      state.metrics.opened += 1;
+      state.activeReqId = ev.reqId;
+      state.sessions.set(ev.reqId, {
+        openedAt: ev.ts,
+        upBytes: 0,
+        downBytes: 0,
+        upChunks: 0,
+        downChunks: 0,
+      });
+
+      byId('node-client').classList.add('active');
+      byId('node-proxy').classList.add('active');
+      byId('node-backend').classList.add('active');
+      byId('backend-target').textContent = ev.target || 'unknown';
+      byId('label-c2p').textContent = 'upgrade request';
+      byId('label-p2b').textContent = '101 switching protocols';
+      pulseLine('line-c2p', 'pulse-fwd');
+      pulseLine('line-p2b', 'pulse-fwd');
+      setStage('UPGRADE');
+
+      updateSessionBox(`Req ${ev.reqId}\nClient: ${ev.clientIp || 'unknown'}\nRoute: ${ev.route || '-'}\nForwarded: ${ev.forwardedPath || '-'}\nTarget: ${ev.target || '-'}`);
+      updateProtocolMeta('ws', ev.targetProtocol || '-');
+
+      appendFeed('proxy-feed', 'OPENED', `${ev.reqId} | ${ev.target} | ${ev.forwardedPath}`, ev.ts);
+      renderMetrics();
+      return;
+    }
+
+    if (ev.type === 'MESSAGE') {
+      const active = state.sessions.get(ev.reqId) || {
+        openedAt: ev.ts,
+        upBytes: 0,
+        downBytes: 0,
+        upChunks: 0,
+        downChunks: 0,
+      };
+
+      setStage('TRAFFIC');
+      byId('node-proxy').classList.add('active');
+      byId('node-backend').classList.add('active');
+
+      if (ev.direction === 'up') {
+        state.metrics.upBytes += ev.bytes || 0;
+        state.metrics.upChunks += 1;
+        active.upBytes += ev.bytes || 0;
+        active.upChunks += 1;
+        byId('label-c2p').textContent = `up ${ev.bytes || 0} B`;
+        byId('label-p2b').textContent = `proxy->main ${ev.bytes || 0} B`;
+        pulseLine('line-c2p', 'pulse-fwd');
+        pulseLine('line-p2b', 'pulse-fwd');
+        appendFeed('proxy-feed', 'MESSAGE_UP', `${ev.reqId} | ${ev.bytes || 0} bytes`, ev.ts);
+      } else {
+        state.metrics.downBytes += ev.bytes || 0;
+        state.metrics.downChunks += 1;
+        active.downBytes += ev.bytes || 0;
+        active.downChunks += 1;
+        byId('label-p2b').textContent = `main->proxy ${ev.bytes || 0} B`;
+        byId('label-c2p').textContent = `down ${ev.bytes || 0} B`;
+        pulseLine('line-p2b', 'pulse-back');
+        pulseLine('line-c2p', 'pulse-back');
+        appendFeed('proxy-feed', 'MESSAGE_DOWN', `${ev.reqId} | ${ev.bytes || 0} bytes`, ev.ts);
+      }
+
+      state.sessions.set(ev.reqId, active);
+      updateSessionBox(
+        `Req ${ev.reqId}\nDuration: ${Math.max(0, Date.now() - (active.openedAt || Date.now()))} ms\n` +
+        `Up: ${formatBytes(active.upBytes)} (${active.upChunks} chunks)\n` +
+        `Down: ${formatBytes(active.downBytes)} (${active.downChunks} chunks)`,
+      );
+      renderMetrics();
+      return;
+    }
+
+    if (ev.type === 'CLOSED') {
+      state.metrics.closed += 1;
+      state.metrics.active = Math.max(0, state.metrics.active - 1);
+
+      byId('label-c2p').textContent = 'closed';
+      byId('label-p2b').textContent = 'closed';
+      pulseLine('line-p2b', 'pulse-back');
+      pulseLine('line-c2p', 'pulse-back');
+      setStage('CLOSED');
+
+      updateSessionBox(
+        `Req ${ev.reqId}\nReason: ${ev.reason || 'closed'}\nDuration: ${ev.durationMs || 0} ms\n` +
+        `Up: ${formatBytes(ev.upBytes || 0)} (${ev.upChunks || 0} chunks)\n` +
+        `Down: ${formatBytes(ev.downBytes || 0)} (${ev.downChunks || 0} chunks)`,
+      );
+
+      appendFeed(
+        'proxy-feed',
+        'CLOSED',
+        `${ev.reqId} | ${ev.reason || 'closed'} | up ${ev.upChunks || 0} | down ${ev.downChunks || 0}`,
+        ev.ts,
+      );
+      renderMetrics();
+      return;
+    }
+
+    if (ev.type === 'REJECTED') {
+      state.metrics.rejected += 1;
+      state.metrics.errors += 1;
+
+      resetFlowNodeState();
+      byId('node-proxy').classList.add('error');
+      pulseLine('line-c2p', 'pulse-err');
+      setStage('HANDSHAKE', true);
+
+      updateSessionBox(`Rejected\nReq: ${ev.reqId || '-'}\nStatus: ${ev.status || '-'}\nReason: ${ev.reason || '-'}\nRoute: ${ev.route || '-'}`);
+      appendFeed('proxy-feed', 'REJECTED', `${ev.reqId || '-'} | ${ev.status || '-'} ${ev.reason || ''}`, ev.ts);
+      renderMetrics();
+      return;
+    }
+
+    if (ev.type === 'ERROR') {
+      state.metrics.errors += 1;
+
+      byId('node-proxy').classList.add('error');
+      pulseLine('line-p2b', 'pulse-err');
+      setStage('UPGRADE', true);
+      updateSessionBox(`Proxy error\nReq: ${ev.reqId || '-'}\n${ev.error || 'unknown error'}`);
+
+      appendFeed('proxy-feed', 'ERROR', `${ev.reqId || '-'} | ${ev.error || 'unknown error'}`, ev.ts);
+      renderMetrics();
+    }
+  }
+
+  function describeBackendPayload(payload) {
+    if (!payload || !payload.type) return 'No payload';
+
+    if (payload.type === 'BACKEND_ONLINE') {
+      return `Backend online at ${payload.url || '-'} (port ${payload.backendPort || '-'})`;
+    }
+    if (payload.type === 'HTTP_INBOUND') {
+      return `${payload.method || 'HTTP'} ${payload.url || ''} | req ${payload.reqId || '-'} | bytes ${payload.bodyBytes || 0}`;
+    }
+    if (payload.type === 'HTTP_RESPONDED') {
+      return `${payload.method || 'HTTP'} ${payload.url || ''} -> ${payload.status || '-'} in ${payload.durationMs || 0} ms`;
+    }
+    if (payload.type === 'WS_CONNECTED') {
+      return `WS connected ${payload.connectionId || '-'} from ${payload.clientIp || '-'}`;
+    }
+    if (payload.type === 'WS_MESSAGE_IN') {
+      return `WS in ${payload.connectionId || '-'} ${payload.bytes || 0} bytes`;
+    }
+    if (payload.type === 'WS_MESSAGE_OUT') {
+      return `WS out ${payload.connectionId || '-'} ${payload.bytes || 0} bytes`;
+    }
+    if (payload.type === 'WS_CLOSED') {
+      return `WS closed ${payload.connectionId || '-'} in ${payload.inMessages || 0} out ${payload.outMessages || 0}`;
+    }
+    if (payload.type === 'WS_ERROR') {
+      return `WS error ${payload.connectionId || '-'} ${payload.error || ''}`;
+    }
+
+    return JSON.stringify(payload);
+  }
+
+  function applyBackendMetrics(payload) {
+    if (!payload || !payload.type) return;
+
+    if (payload.type === 'HTTP_INBOUND') state.backend.httpInbound += 1;
+    if (payload.type === 'WS_CONNECTED') state.backend.activeWs += 1;
+    if (payload.type === 'WS_MESSAGE_IN') state.backend.wsIn += 1;
+    if (payload.type === 'WS_MESSAGE_OUT') state.backend.wsOut += 1;
+    if (payload.type === 'WS_CLOSED') state.backend.activeWs = Math.max(0, state.backend.activeWs - 1);
+  }
+
+  function handleBridgeEvent(ev) {
+    if (ev.type === 'CONNECTED' && !ev.payload && !ev.source) {
+      return;
+    }
+
+    if (ev.type === 'ERROR') {
+      state.backend.bridgeErrors += 1;
+      appendFeed('bridge-feed', 'ERROR', `${ev.source || '-'} | ${ev.error || 'bridge error'}`, ev.ts);
+      renderBackendMetrics();
+      return;
+    }
+
+    if (ev.type === 'MESSAGE') {
+      applyBackendMetrics(ev.payload);
+      appendFeed('bridge-feed', 'BRIDGE', describeBackendPayload(ev.payload), ev.ts);
+      renderBackendMetrics();
+      return;
+    }
+
+    const detail = `${ev.source || '-'} | ${ev.reason || ev.url || ''}`;
+    appendFeed('bridge-feed', 'BRIDGE', `${ev.type} | ${detail}`.trim(), ev.ts);
+  }
+
+  function connectProxySse() {
+    state.proxyEs = new EventSource('/ws-events');
+
+    state.proxyEs.onopen = () => {
+      setStatus('proxy-dot', 'proxy-status', true, 'Proxy SSE: live');
+    };
+
+    state.proxyEs.onerror = () => {
+      setStatus('proxy-dot', 'proxy-status', false, 'Proxy SSE: reconnecting');
+    };
+
+    state.proxyEs.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        handleProxyEvent(payload);
+      } catch (_) {}
+    };
+  }
+
+  function connectBridgeSse() {
+    state.bridgeEs = new EventSource('/backend-events');
+
+    state.bridgeEs.onopen = () => {
+      setStatus('bridge-dot', 'bridge-status', true, 'Bridge SSE: live');
+    };
+
+    state.bridgeEs.onerror = () => {
+      setStatus('bridge-dot', 'bridge-status', false, 'Bridge SSE: reconnecting');
+    };
+
+    state.bridgeEs.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        handleBridgeEvent(payload);
+      } catch (_) {}
+    };
+  }
+
+  function normalizeClientUrl() {
+    const rawUrl = byId('ws-url').value.trim();
+    const token = byId('ws-token').value.trim();
+
+    const parsed = new URL(rawUrl);
+    if (token && !parsed.searchParams.get('token') && !parsed.searchParams.get('access_token')) {
+      parsed.searchParams.set('token', token);
+    }
+
+    updateProtocolMeta(parsed.protocol.replace(':', ''), '-');
+    return parsed.toString();
+  }
+
+  function connectClientWs() {
+    if (state.ws) return;
+
+    let finalUrl;
+    try {
+      finalUrl = normalizeClientUrl();
+    } catch (err) {
+      addChatRow('sys', `Invalid websocket URL: ${err.message}`);
+      return;
+    }
+
+    addChatRow('sys', `Connecting to ${finalUrl}`);
+
+    try {
+      state.ws = new WebSocket(finalUrl);
+    } catch (err) {
+      state.ws = null;
+      addChatRow('sys', `WebSocket constructor error: ${err.message}`);
+      return;
+    }
+
+    byId('btn-connect').disabled = true;
+    byId('btn-disconnect').disabled = false;
+
+    state.ws.onopen = () => {
+      byId('btn-send').disabled = false;
+      addChatRow('sys', 'WebSocket connected');
+      if (byId('auto-ping').checked) toggleAutoPing();
+    };
+
+    state.ws.onmessage = (message) => {
+      addChatRow('server', `backend: ${message.data}`);
+    };
+
+    state.ws.onerror = () => {
+      addChatRow('sys', 'WebSocket error');
+    };
+
+    state.ws.onclose = (event) => {
+      addChatRow('sys', `WebSocket closed code=${event.code} reason=${event.reason || '-'}`);
+      stopPingTimer();
+      state.ws = null;
+      byId('btn-connect').disabled = false;
+      byId('btn-disconnect').disabled = true;
+      byId('btn-send').disabled = true;
+    };
+  }
+
+  function disconnectClientWs() {
+    if (!state.ws) return;
+    state.ws.close();
+  }
+
+  function sendClientMessage() {
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+    const payload = byId('ws-message').value.trim();
+    if (!payload) return;
+    state.ws.send(payload);
+    addChatRow('me', `client: ${payload}`);
+    byId('ws-message').value = '';
+  }
+
+  function insertSamplePayload() {
+    byId('ws-message').value = JSON.stringify({
+      type: 'chat',
+      text: 'hello through proxy',
+      ts: Date.now(),
+    });
+  }
+
+  function stopPingTimer() {
+    if (state.pingTimer) {
+      clearInterval(state.pingTimer);
+      state.pingTimer = null;
+    }
+  }
+
+  function toggleAutoPing() {
+    stopPingTimer();
+
+    if (!byId('auto-ping').checked) return;
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+
+    state.pingTimer = setInterval(() => {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        stopPingTimer();
+        return;
+      }
+      const payload = JSON.stringify({ type: 'ping', ts: Date.now() });
+      state.ws.send(payload);
+      addChatRow('me', `client: ${payload}`);
+    }, 3000);
+  }
+
+  function boot() {
+    renderMetrics();
+    renderBackendMetrics();
+    addChatRow('sys', 'Ready. Connect a websocket to visualize full proxy and backend flow.');
+    connectProxySse();
+    connectBridgeSse();
+  }
+
+  boot();
+</script>
+</body>
+</html>

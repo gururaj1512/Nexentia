@@ -8,20 +8,11 @@
 const { EventEmitter } = require('events');
 const rateLimiter      = require('../rateLimiter');
 const rules            = require('../rateLimitRules');
+const { getClientIp }  = require('../ipTracker');
 
 // ── Event bus (separate from the proxy logger) ────────────────────────────────
 const rlEvents = new EventEmitter();
 rlEvents.setMaxListeners(100);
-
-/**
- * Extract the real client IP.
- * Trust X-Forwarded-For only when the proxy itself set it (common setup).
- */
-function clientIp(req) {
-  const fwd = req.headers['x-forwarded-for'];
-  if (fwd) return fwd.split(',')[0].trim();
-  return req.socket.remoteAddress || '127.0.0.1';
-}
 
 /**
  * Build and return the Express middleware function.
@@ -29,7 +20,7 @@ function clientIp(req) {
  * before the request is ever forwarded.
  */
 function rateLimitMiddleware(req, res, next) {
-  const ip = clientIp(req);
+  const ip = req.clientIp || getClientIp(req);
 
   for (const rule of rules) {
     // Method check

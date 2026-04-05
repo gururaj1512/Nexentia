@@ -19,6 +19,7 @@ function emit(step, data) {
 function forwardRequest(req, res, target, stripPrefix, routePath) {
   return new Promise((resolve, reject) => {
     const reqId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const senderIp = req.clientIp || req.socket.remoteAddress || '127.0.0.1';
 
     // Strip route prefix before forwarding
     let urlPath = req.url;
@@ -34,9 +35,9 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
       if (!HOP_BY_HOP.has(k.toLowerCase())) outHeaders[k] = v;
     }
     outHeaders['host']              = targetUrl.host;
-    outHeaders['x-forwarded-for']   = req.socket.remoteAddress || '127.0.0.1';
+    outHeaders['x-forwarded-for']   = senderIp;
     outHeaders['x-forwarded-host']  = req.headers.host || targetUrl.host;
-    outHeaders['x-forwarded-proto'] = 'http';
+    outHeaders['x-forwarded-proto'] = req.socket.encrypted ? 'https' : 'http';
     outHeaders['x-proxy-req-id']    = reqId;
 
     // Prepare body buffer (express.json already parsed the stream for us)
@@ -66,7 +67,7 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
       reqId,
       method:   req.method,
       url:      req.url,
-      clientIp: req.socket.remoteAddress || 'unknown',
+      clientIp: senderIp,
     });
 
     // ── Step 2 ────────────────────────────────────────────────────────
