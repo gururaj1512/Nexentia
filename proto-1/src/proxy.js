@@ -173,6 +173,11 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
 
         resHeaders['content-length'] = String(body.length);
 
+        resHeaders['access-control-allow-origin']      = req.headers['origin'] || '*';
+        resHeaders['access-control-allow-methods']     = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
+        resHeaders['access-control-allow-headers']     = 'Content-Type, Authorization, X-Requested-With';
+        resHeaders['access-control-allow-credentials'] = 'true';
+
         res.writeHead(proxyRes.statusCode, resHeaders);
         res.end(body);
 

@@ -47,6 +47,15 @@ app.use((req, res, next) => {
 // ── Static UI ──────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', req.headers['origin'] || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
 // ── WAF (runs FIRST — before rate limiting and routing) ────────────────────
 const wafMiddleware = buildWafMiddleware(runtimeConfig.security || {});
 app.use(wafMiddleware);
