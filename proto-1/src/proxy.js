@@ -17,6 +17,43 @@ function emit(step, data) {
   proxyEvents.emit('proxy:step', { ts: Date.now(), step, ...data });
 }
 
+function defaultPortForProtocol(protocol) {
+  return protocol === 'https:' ? '443' : '80';
+}
+
+function rewriteUpstreamLocation(locationValue, targetUrl, routePath, stripPrefix) {
+  if (!locationValue) return locationValue;
+
+  try {
+    const targetOrigin = `${targetUrl.protocol}//${targetUrl.host}`;
+    const parsedLocation = new URL(locationValue, targetOrigin);
+    const rawHasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(locationValue);
+
+    const targetPort = targetUrl.port || defaultPortForProtocol(targetUrl.protocol);
+    const locationPort = parsedLocation.port || defaultPortForProtocol(parsedLocation.protocol);
+
+    const isSameTarget =
+      parsedLocation.protocol === targetUrl.protocol &&
+      parsedLocation.hostname === targetUrl.hostname &&
+      locationPort === targetPort;
+
+    if (rawHasScheme && !isSameTarget) {
+      return locationValue;
+    }
+
+    let rewrittenPath = `${parsedLocation.pathname}${parsedLocation.search}${parsedLocation.hash}`;
+
+    if (stripPrefix && routePath && !rewrittenPath.startsWith(routePath)) {
+      rewrittenPath = `${routePath}${rewrittenPath.startsWith('/') ? '' : '/'}${rewrittenPath}`;
+      rewrittenPath = rewrittenPath.replace(/\/{2,}/g, '/');
+    }
+
+    return rewrittenPath;
+  } catch (_) {
+    return locationValue;
+  }
+}
+
 function forwardRequest(req, res, target, stripPrefix, routePath) {
   return new Promise((resolve, reject) => {
     const reqId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -123,6 +160,17 @@ function forwardRequest(req, res, target, stripPrefix, routePath) {
         for (const [k, v] of Object.entries(proxyRes.headers)) {
           if (!HOP_BY_HOP.has(k.toLowerCase())) resHeaders[k] = v;
         }
+
+        const originalLocation = resHeaders['location'];
+        const rewrittenLocation = rewriteUpstreamLocation(originalLocation, targetUrl, routePath, stripPrefix);
+        if (rewrittenLocation && rewrittenLocation !== originalLocation) {
+          resHeaders['location'] = rewrittenLocation;
+          const statusCode = proxyRes.statusCode || 0;
+          if ([301, 302, 307, 308].includes(statusCode)) {
+            resHeaders['cache-control'] = 'no-store';
+          }
+        }
+
         resHeaders['content-length'] = String(body.length);
 
         res.writeHead(proxyRes.statusCode, resHeaders);
