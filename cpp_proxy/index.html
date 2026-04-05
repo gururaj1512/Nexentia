@@ -473,7 +473,7 @@
       setActive('node-backend', true);
       log('→ Backend received request');
 
-      const res = await fetch('http://localhost:3000/');
+      const res = await fetch('http://127.0.0.1:3000/');
       const data = await res.text();
 
       log('← 200 OK — ' + data.slice(0, 72), 'ok');
